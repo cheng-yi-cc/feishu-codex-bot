@@ -1,7 +1,11 @@
 import type { TaskEventRecord, TaskRecord, WorkspaceState } from "../runtime/types.js";
 
 export function renderUsageReply(): string {
-  return "用法: /ask 你的问题";
+  return [
+    "用法: /ask 你的问题",
+    "/run <command> | /test [target] | /diff | /files",
+    "/logs | /branch [name] | /apply | /abort",
+  ].join("\n");
 }
 
 export function renderStatusReply(input: {
@@ -55,4 +59,14 @@ export function renderResumeReply(task: TaskRecord | undefined, events: TaskEven
   }
 
   return lines.join("\n");
+}
+
+export function renderWorkspaceCommandReply(text: string): string {
+  const normalized = text.trim();
+  return normalized || "命令执行完成。";
+}
+
+export function renderWorkspaceCommandErrorReply(error: unknown): string {
+  const message = error instanceof Error ? error.message : "unknown workspace command error";
+  return `工作区命令执行失败: ${message}`;
 }

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import { buildPrompt } from "../codex/prompt-builder.js";
@@ -5,8 +6,17 @@ import { parseAssistantResponse, type OutgoingDirective } from "../codex/respons
 import type { CodexRunner } from "../codex/types.js";
 import type { BotConfig } from "../types/config.js";
 import type { SessionStore } from "../types/contracts.js";
+import { createWorkspaceCommandRunner } from "../workspace/command-runner.js";
+import { resolveWorkspacePath } from "../workspace/path-policy.js";
 import { mapCodexEventToProgress } from "./progress.js";
-import type { RuntimeStore, TaskKind, TaskRecord, TaskEventPhase, WorkspaceState } from "./types.js";
+import type {
+  RuntimeStore,
+  TaskKind,
+  TaskRecord,
+  TaskEventPhase,
+  WorkspaceCommandName,
+  WorkspaceState,
+} from "./types.js";
 
 type TaskOrchestratorDeps = {
   logger: Logger;
@@ -39,6 +49,10 @@ export type StartTaskResult = {
 };
 
 const taskAbortControllers = new Map<string, AbortController>();
+const workspaceCommandRunner = createWorkspaceCommandRunner({
+  shell: "powershell.exe",
+  maxOutputChars: 4000,
+});
 
 function resolveWorkspaceState(
   state: WorkspaceState | undefined,
@@ -109,6 +123,62 @@ function buildAssistantHistoryEntry(text: string, directives: OutgoingDirective[
   }
   if (directives.length > 0) {
     return `[assistant_sent_attachments]: ${directives.length}`;
+  }
+  return undefined;
+}
+
+function escapePowershellLiteral(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function buildLogsCommand(workdir: string): string {
+  const logPath = path.join(workdir, "logs", "app.log");
+  const escapedLogPath = escapePowershellLiteral(logPath);
+  return [
+    `$logPath = '${escapedLogPath}'`,
+    'if (Test-Path -LiteralPath $logPath) {',
+    "  Get-Content -LiteralPath $logPath -Tail 80",
+    "} else {",
+    '  Write-Output "app.log not found: $logPath"',
+    "}",
+  ].join("; ");
+}
+
+function buildBranchCommand(branchName?: string): string {
+  if (!branchName) {
+    return "git branch --show-current";
+  }
+
+  const escapedBranchName = escapePowershellLiteral(branchName);
+  return [
+    `$branch = '${escapedBranchName}'`,
+    "git switch -- $branch 2>$null",
+    "if ($LASTEXITCODE -ne 0) { git switch -c -- $branch }",
+  ].join("; ");
+}
+
+function buildWorkspaceCommandText(
+  command: WorkspaceCommandName,
+  value: string | undefined,
+  workdir: string,
+): string | undefined {
+  if (command === "run") {
+    return value?.trim();
+  }
+  if (command === "test") {
+    return value?.trim() ? `npm test -- ${value.trim()}` : "npm test";
+  }
+  if (command === "diff") {
+    return "git diff --stat --no-ext-diff";
+  }
+  if (command === "files") {
+    return "git diff --name-only --no-ext-diff";
+  }
+  if (command === "logs") {
+    return buildLogsCommand(workdir);
+  }
+  if (command === "branch") {
+    return buildBranchCommand(value?.trim());
   }
   return undefined;
 }
@@ -247,6 +317,53 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
       } finally {
         taskAbortControllers.delete(taskId);
       }
+    },
+    async handleWorkspaceCommand(params: {
+      sessionKey: string;
+      command: WorkspaceCommandName;
+      value?: string;
+    }): Promise<{ text: string; directives: OutgoingDirective[] }> {
+      const workspace = runtimeStore.getWorkspaceState(params.sessionKey);
+      const cwd = resolveWorkspacePath(config.codexWorkdir, workspace?.cwd ?? config.codexWorkdir);
+
+      if (params.command === "abort") {
+        const taskId = workspace?.lastTaskId;
+        if (taskId && taskAbortControllers.has(taskId)) {
+          taskAbortControllers.get(taskId)?.abort();
+          runtimeStore.updateTaskStatus(taskId, "interrupted", {
+            errorSummary: "aborted from Feishu",
+            finishedAt: Date.now(),
+          });
+          return { text: "已终止当前任务。", directives: [] };
+        }
+        return { text: "当前没有可终止的运行任务。", directives: [] };
+      }
+
+      if (params.command === "apply") {
+        return {
+          text: "/apply 暂未接入自动补丁流程，请在 Codex 会话中直接执行。",
+          directives: [],
+        };
+      }
+
+      const commandText = buildWorkspaceCommandText(params.command, params.value, cwd);
+      if (!commandText) {
+        return {
+          text: "请提供要执行的命令。",
+          directives: [],
+        };
+      }
+
+      const result = await workspaceCommandRunner.run({
+        cwd,
+        command: commandText,
+        timeoutMs: config.codexTimeoutMs,
+      });
+
+      return {
+        text: result.exitCode === 0 ? result.stdout || "命令执行完成。" : result.stderr || result.stdout,
+        directives: [],
+      };
     },
   };
 }

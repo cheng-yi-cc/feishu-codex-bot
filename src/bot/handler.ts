@@ -11,7 +11,14 @@ import { addTypingIndicator, removeTypingIndicator } from "../feishu/typing.js";
 import { enforceAccessPolicy } from "./access-control.js";
 import { parseCommand } from "./commands.js";
 import { resolveIntent } from "./router.js";
-import { renderProgressReply, renderResumeReply, renderStatusReply, renderUsageReply } from "./response-renderer.js";
+import {
+  renderProgressReply,
+  renderResumeReply,
+  renderStatusReply,
+  renderUsageReply,
+  renderWorkspaceCommandErrorReply,
+  renderWorkspaceCommandReply,
+} from "./response-renderer.js";
 import { SerialTaskQueue } from "./queue.js";
 
 export type RuntimeStatus = {
@@ -257,6 +264,37 @@ export function createMessageHandler(deps: HandlerDeps) {
       const latestTask = findLatestResumableTask(store, sessionKey);
       const events = latestTask ? store.loadTaskEvents(latestTask.id, 10) : [];
       await sendTextReply(deps, message, renderResumeReply(latestTask, events));
+      return;
+    }
+
+    if (intent.kind === "workspace.command") {
+      const executeWorkspaceCommand = async () => {
+        try {
+          const orchestrator = createTaskOrchestrator({
+            logger,
+            config,
+            sessionStore: store,
+            runtimeStore: store,
+            codexRunner,
+          });
+          const result = await orchestrator.handleWorkspaceCommand({
+            sessionKey,
+            command: intent.command,
+            value: intent.value,
+          });
+          await sendTextReply(deps, message, renderWorkspaceCommandReply(result.text));
+        } catch (error) {
+          runtimeStatus.lastErrorAt = Date.now();
+          logger.error({ err: error, messageId: message.messageId }, "workspace command failed");
+          await sendTextReply(deps, message, renderWorkspaceCommandErrorReply(error));
+        }
+      };
+
+      if (intent.command === "abort") {
+        await executeWorkspaceCommand();
+      } else {
+        await queue.enqueue(executeWorkspaceCommand);
+      }
       return;
     }
 

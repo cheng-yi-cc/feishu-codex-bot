@@ -641,6 +641,54 @@ describe("createMessageHandler", () => {
     ).toBe(true);
   });
 
+  it("executes workspace commands through the handler", async () => {
+    const store = new MemoryStore();
+    const queue = new SerialTaskQueue();
+    const create = vi.fn(async () => ({ code: 0 }));
+    const run = vi.fn(async () => ({ answer: "unused", durationMs: 1 }));
+
+    const handler = createMessageHandler({
+      config: {
+        ...makeConfig(),
+        codexWorkdir: process.cwd(),
+        codexTimeoutMs: 5000,
+      },
+      logger: pino({ enabled: false }),
+      store,
+      codexRunner: { run },
+      queue,
+      feishuClient: {
+        im: {
+          message: {
+            reply: vi.fn(async () => ({ code: 0 })),
+            create,
+          },
+        },
+      } as any,
+      runtimeStatus: { startedAt: Date.now(), lastErrorAt: null },
+    });
+
+    await handler({
+      messageId: "m_workspace_run",
+      chatId: "oc_dm",
+      chatType: "p2p",
+      senderOpenId: "ou_allow",
+      messageType: "text",
+      text: '/run Write-Output "workspace-ok"',
+      mentionedBot: false,
+      attachments: [],
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: expect.stringContaining("workspace-ok"),
+        }),
+      }),
+    );
+  });
+
   it("treats plain p2p text as ask prompt", async () => {
     const store = new MemoryStore();
     const queue = new SerialTaskQueue();

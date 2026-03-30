@@ -2,16 +2,23 @@ export type WorkspaceMode = "chat" | "dev";
 
 export type TaskKind = "chat" | "dev" | "control";
 
+export type WorkspaceCommandName = "run" | "test" | "diff" | "files" | "logs" | "branch" | "apply" | "abort";
+
 export type UserIntent =
   | { kind: "task.start"; taskKind: TaskKind; prompt: string }
   | { kind: "workspace.mode"; action: "show" | "reset" | "set" | "invalid"; mode?: WorkspaceMode; invalidArg?: string }
   | { kind: "workspace.resume" }
   | { kind: "workspace.cwd"; path?: string }
-  | { kind: "workspace.command"; command: "run" | "test" | "diff" | "files" | "logs" | "branch" | "apply" | "abort"; value?: string }
+  | { kind: "workspace.command"; command: WorkspaceCommandName; value?: string }
   | { kind: "reply.status" }
   | { kind: "reply.usage" }
   | { kind: "reply.model"; action: "show" | "reset" | "set" | "invalid"; model?: string; invalidArg?: string }
-  | { kind: "reply.think"; action: "show" | "reset" | "set" | "invalid"; level?: "low" | "medium" | "high"; invalidArg?: string }
+  | {
+      kind: "reply.think";
+      action: "show" | "reset" | "set" | "invalid";
+      level?: "low" | "medium" | "high";
+      invalidArg?: string;
+    }
   | { kind: "session.reset" }
   | { kind: "noop" };
 
