@@ -1,39 +1,40 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // Reveal animations on scroll
-    const sections = document.querySelectorAll('section');
-    
-    const revealSection = (entries, observer) => {
-        const [entry] = entries;
-        if (!entry.isIntersecting) return;
-        
-        entry.target.style.opacity = 1;
-        entry.target.style.transform = 'translateY(0)';
-        observer.unobserve(entry.target);
-    };
-    
-    const sectionObserver = new IntersectionObserver(revealSection, {
-        root: null,
-        threshold: 0.15,
-    });
-    
-    sections.forEach(sec => {
-        if (!sec.classList.contains('hero')) {
-            sec.style.opacity = 0;
-            sec.style.transform = 'translateY(30px)';
-            sec.style.transition = 'all 0.8s cubic-bezier(0.16, 1, 0.3, 1)';
-            sectionObserver.observe(sec);
-        }
+    // Scroll Progress
+    const progressBar = document.querySelector('.progress-bar');
+    window.addEventListener('scroll', () => {
+        const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+        const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+        const scrolled = (winScroll / height) * 100;
+        progressBar.style.width = scrolled + '%';
     });
 
-    // Glass effect adjustment on navbar based on scroll
-    const navbar = document.querySelector('.navbar');
-    window.addEventListener('scroll', () => {
-        if (window.scrollY > 50) {
-            navbar.style.background = 'rgba(13, 15, 23, 0.9)';
-            navbar.style.boxShadow = '0 10px 30px -10px rgba(0, 0, 0, 0.5)';
-        } else {
-            navbar.style.background = 'rgba(13, 15, 23, 0.8)';
-            navbar.style.boxShadow = 'none';
-        }
+    // Intersection Observer for scroll stagger animations
+    const observerOptions = {
+        root: null,
+        rootMargin: '0px',
+        threshold: 0.1
+    };
+
+    const targetElements = document.querySelectorAll('.feature-block, .flow-node, .qs-text, .snippet-box');
+    targetElements.forEach(el => {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(20px)';
+        el.style.transition = 'all 0.6s cubic-bezier(0.16, 1, 0.3, 1)';
     });
+
+    const observer = new IntersectionObserver((entries, obs) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+                obs.unobserve(entry.target);
+            }
+        });
+    }, observerOptions);
+
+    targetElements.forEach(el => observer.observe(el));
+    
+    // Typewriter effect logic
+    const termTyping = document.getElementById('term-typing');
+    // Simplified static display right now due to fast load necessity, but could be enhanced
 });
