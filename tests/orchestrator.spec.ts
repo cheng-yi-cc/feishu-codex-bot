@@ -113,4 +113,78 @@ describe("createTaskOrchestrator", () => {
       }),
     );
   });
+
+  it("preserves an existing workspace state when saving lastTaskId for a non-dev task", async () => {
+    const sessionStore: Pick<
+      SessionStore,
+      "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
+    > = {
+      appendUser: vi.fn(),
+      appendAssistant: vi.fn(),
+      loadRecent: vi.fn(
+        (): SessionMessage[] => [
+          { role: "user", content: "resume chat" },
+        ],
+      ),
+      getSessionOptions: vi.fn((): SessionOptions => ({})),
+    };
+
+    const existingState = {
+      sessionKey: "dm:ou_allow",
+      mode: "dev" as const,
+      cwd: "D:\\repo\\custom",
+      branch: "feature/runtime",
+      lastTaskId: "old-task",
+      lastErrorSummary: "previous warning",
+      updatedAt: 100,
+    };
+
+    const runtimeStore: Pick<
+      RuntimeStore,
+      | "saveWorkspaceState"
+      | "getWorkspaceState"
+      | "createTask"
+      | "updateTaskStatus"
+      | "appendTaskEvent"
+      | "replaceTaskArtifacts"
+    > = {
+      saveWorkspaceState: vi.fn(),
+      getWorkspaceState: vi.fn(() => existingState),
+      createTask: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      appendTaskEvent: vi.fn(),
+      replaceTaskArtifacts: vi.fn(),
+    };
+
+    const codexRunner: CodexRunner = {
+      run: vi.fn(async () => ({ answer: "\u5df2\u5b8c\u6210", durationMs: 20 })),
+    };
+
+    const orchestrator = createTaskOrchestrator({
+      logger: pino({ enabled: false }),
+      config: makeConfig(),
+      sessionStore,
+      runtimeStore,
+      codexRunner,
+    });
+
+    await orchestrator.startTask({
+      sessionKey: "dm:ou_allow",
+      chatId: "oc_1",
+      prompt: "resume chat",
+      taskKind: "chat",
+    });
+
+    expect(runtimeStore.saveWorkspaceState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: existingState.sessionKey,
+        mode: existingState.mode,
+        cwd: existingState.cwd,
+        branch: existingState.branch,
+        lastErrorSummary: existingState.lastErrorSummary,
+        lastTaskId: expect.any(String),
+        updatedAt: expect.any(Number),
+      }),
+    );
+  });
 });

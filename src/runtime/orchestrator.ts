@@ -48,13 +48,21 @@ function resolveWorkspaceState(
   workdir: string,
   updatedAt: number,
 ): WorkspaceState {
+  if (state) {
+    return {
+      ...state,
+      lastTaskId: taskId,
+      updatedAt,
+    };
+  }
+
   return {
     sessionKey,
     mode: taskKind === "dev" ? "dev" : "chat",
-    cwd: state?.cwd ?? workdir,
-    branch: state?.branch,
+    cwd: workdir,
+    branch: undefined,
     lastTaskId: taskId,
-    lastErrorSummary: state?.lastErrorSummary,
+    lastErrorSummary: undefined,
     updatedAt,
   };
 }
