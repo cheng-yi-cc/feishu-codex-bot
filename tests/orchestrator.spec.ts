@@ -1,10 +1,22 @@
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import pino from "pino";
 import { createTaskOrchestrator } from "../src/runtime/orchestrator.js";
 import type { CodexRunner } from "../src/codex/types.js";
 import type { RuntimeStore } from "../src/runtime/types.js";
 import type { BotConfig } from "../src/types/config.js";
 import type { CodexRunRequest, SessionMessage, SessionOptions, SessionStore } from "../src/types/contracts.js";
+
+const tempPaths: string[] = [];
+
+afterEach(() => {
+  for (const tempPath of tempPaths) {
+    fs.rmSync(tempPath, { recursive: true, force: true });
+  }
+  tempPaths.length = 0;
+});
 
 function makeConfig(): BotConfig {
   return {
@@ -26,6 +38,13 @@ function makeConfig(): BotConfig {
     healthPort: 8787,
     replyChunkChars: 3200,
     dedupRetentionMs: 1000,
+  };
+}
+
+function makeConfigWithWorkdir(workdir: string): BotConfig {
+  return {
+    ...makeConfig(),
+    codexWorkdir: workdir,
   };
 }
 
@@ -114,6 +133,70 @@ describe("createTaskOrchestrator", () => {
     );
   });
 
+  it("marks a partially created task failed when setup throws before codex run", async () => {
+    const sessionStore: Pick<
+      SessionStore,
+      "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
+    > = {
+      appendUser: vi.fn(),
+      appendAssistant: vi.fn(),
+      loadRecent: vi.fn(() => []),
+      getSessionOptions: vi.fn((): SessionOptions => ({})),
+    };
+
+    const runtimeStore: Pick<
+      RuntimeStore,
+      | "saveWorkspaceState"
+      | "getWorkspaceState"
+      | "createTask"
+      | "updateTaskStatus"
+      | "appendTaskEvent"
+      | "replaceTaskArtifacts"
+    > = {
+      saveWorkspaceState: vi.fn(() => {
+        throw new Error("workspace save failed");
+      }),
+      getWorkspaceState: vi.fn(() => undefined),
+      createTask: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      appendTaskEvent: vi.fn(),
+      replaceTaskArtifacts: vi.fn(),
+    };
+
+    const codexRunner: CodexRunner = {
+      run: vi.fn(),
+    };
+
+    const orchestrator = createTaskOrchestrator({
+      logger: pino({ enabled: false }),
+      config: makeConfig(),
+      sessionStore,
+      runtimeStore,
+      codexRunner,
+    });
+
+    await expect(
+      orchestrator.startTask({
+        sessionKey: "dm:ou_allow",
+        chatId: "oc_1",
+        prompt: "setup failure",
+        taskKind: "dev",
+      }),
+    ).rejects.toThrow("workspace save failed");
+
+    expect(runtimeStore.createTask).toHaveBeenCalled();
+    expect(runtimeStore.updateTaskStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "failed",
+      expect.objectContaining({
+        finishedAt: expect.any(Number),
+        errorSummary: "workspace save failed",
+      }),
+    );
+    expect(runtimeStore.replaceTaskArtifacts).toHaveBeenCalledWith(expect.any(String), []);
+    expect(codexRunner.run).not.toHaveBeenCalled();
+  });
+
   it("preserves an existing workspace state when saving lastTaskId for a non-dev task", async () => {
     const sessionStore: Pick<
       SessionStore,
@@ -184,6 +267,85 @@ describe("createTaskOrchestrator", () => {
         lastErrorSummary: existingState.lastErrorSummary,
         lastTaskId: expect.any(String),
         updatedAt: expect.any(Number),
+      }),
+    );
+  });
+
+  it("does not leak directive markup into returned text, history, or summary", async () => {
+    const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-codex-orchestrator-"));
+    tempPaths.push(workdir);
+    const filePath = path.join(workdir, "artifact.txt");
+    fs.writeFileSync(filePath, "artifact");
+
+    const sessionStore: Pick<
+      SessionStore,
+      "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
+    > = {
+      appendUser: vi.fn(),
+      appendAssistant: vi.fn(),
+      loadRecent: vi.fn(
+        (): SessionMessage[] => [
+          { role: "user", content: "send file" },
+        ],
+      ),
+      getSessionOptions: vi.fn((): SessionOptions => ({})),
+    };
+
+    const runtimeStore: Pick<
+      RuntimeStore,
+      | "saveWorkspaceState"
+      | "getWorkspaceState"
+      | "createTask"
+      | "updateTaskStatus"
+      | "appendTaskEvent"
+      | "replaceTaskArtifacts"
+    > = {
+      saveWorkspaceState: vi.fn(),
+      getWorkspaceState: vi.fn(() => undefined),
+      createTask: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      appendTaskEvent: vi.fn(),
+      replaceTaskArtifacts: vi.fn(),
+    };
+
+    const codexRunner: CodexRunner = {
+      run: vi.fn(async () => ({
+        answer: '<send_file path="artifact.txt" />',
+        durationMs: 20,
+      })),
+    };
+
+    const orchestrator = createTaskOrchestrator({
+      logger: pino({ enabled: false }),
+      config: makeConfigWithWorkdir(workdir),
+      sessionStore,
+      runtimeStore,
+      codexRunner,
+    });
+
+    const result = await orchestrator.startTask({
+      sessionKey: "dm:ou_allow",
+      chatId: "oc_1",
+      prompt: "send file",
+      taskKind: "chat",
+    });
+
+    expect(result.text).toBe("");
+    expect(result.directives).toEqual([
+      {
+        type: "file",
+        path: filePath,
+      },
+    ]);
+    expect(sessionStore.appendAssistant).toHaveBeenCalledWith(
+      "dm:ou_allow",
+      "[assistant_sent_attachments]: 1",
+    );
+    expect(runtimeStore.updateTaskStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "completed",
+      expect.objectContaining({
+        summary: undefined,
       }),
     );
   });

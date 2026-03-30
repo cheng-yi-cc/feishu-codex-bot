@@ -93,6 +93,16 @@ function isErrorWithMessage(error: unknown): error is Error {
   return error instanceof Error;
 }
 
+function buildAssistantHistoryEntry(text: string, directives: OutgoingDirective[]): string | undefined {
+  if (text) {
+    return text;
+  }
+  if (directives.length > 0) {
+    return `[assistant_sent_attachments]: ${directives.length}`;
+  }
+  return undefined;
+}
+
 export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
   const { logger, config, sessionStore, runtimeStore, codexRunner } = deps;
 
@@ -103,6 +113,8 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
       const queuedAt = Date.now();
       const controller = new AbortController();
       taskAbortControllers.set(taskId, controller);
+      let taskCreated = false;
+      let workdir = config.codexWorkdir;
 
       let eventSeq = 0;
       const appendEvent = (phase: TaskEventPhase, message: string, createdAt: number) => {
@@ -115,21 +127,22 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
         });
       };
 
-      const existingState = runtimeStore.getWorkspaceState(sessionKey);
-      const workdir = existingState?.cwd ?? config.codexWorkdir;
-
-      runtimeStore.createTask(buildTaskRecord(taskId, sessionKey, taskKind, prompt, queuedAt));
-      runtimeStore.saveWorkspaceState(
-        resolveWorkspaceState(existingState, sessionKey, taskKind, taskId, workdir, queuedAt),
-      );
-      appendEvent("queued", "\u4efb\u52a1\u5df2\u5165\u961f", queuedAt);
-
-      sessionStore.appendUser(sessionKey, prompt);
-      const history = sessionStore.loadRecent(sessionKey, config.codexHistoryTurns);
-      const codexPrompt = buildPrompt({ sessionKey, history });
-      const sessionOptions = sessionStore.getSessionOptions(sessionKey);
-
       try {
+        const existingState = runtimeStore.getWorkspaceState(sessionKey);
+        workdir = existingState?.cwd ?? config.codexWorkdir;
+
+        runtimeStore.createTask(buildTaskRecord(taskId, sessionKey, taskKind, prompt, queuedAt));
+        taskCreated = true;
+        runtimeStore.saveWorkspaceState(
+          resolveWorkspaceState(existingState, sessionKey, taskKind, taskId, workdir, queuedAt),
+        );
+        appendEvent("queued", "\u4efb\u52a1\u5df2\u5165\u961f", queuedAt);
+
+        sessionStore.appendUser(sessionKey, prompt);
+        const history = sessionStore.loadRecent(sessionKey, config.codexHistoryTurns);
+        const codexPrompt = buildPrompt({ sessionKey, history });
+        const sessionOptions = sessionStore.getSessionOptions(sessionKey);
+
         const result = await codexRunner.run({
           sessionKey,
           prompt: codexPrompt,
@@ -149,13 +162,16 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
         });
 
         const parsed = parseAssistantResponse(result.answer, workdir);
-        const text = parsed.text || result.answer;
+        const text = parsed.text.trim();
+        const historyEntry = buildAssistantHistoryEntry(text, parsed.directives);
         const finishedAt = Date.now();
 
-        sessionStore.appendAssistant(sessionKey, text);
+        if (historyEntry) {
+          sessionStore.appendAssistant(sessionKey, historyEntry);
+        }
         runtimeStore.updateTaskStatus(taskId, "completed", {
           finishedAt,
-          summary: text,
+          summary: text || undefined,
           errorSummary: undefined,
         });
         appendEvent("result", "\u4efb\u52a1\u5b8c\u6210", finishedAt);
@@ -172,12 +188,28 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
         const finishedAt = Date.now();
         const message = isErrorWithMessage(error) ? error.message : "unknown task error";
 
-        runtimeStore.updateTaskStatus(taskId, "failed", {
-          finishedAt,
-          errorSummary: message,
-        });
-        appendEvent("error", message, finishedAt);
-        runtimeStore.replaceTaskArtifacts(taskId, []);
+        if (taskCreated) {
+          try {
+            runtimeStore.updateTaskStatus(taskId, "failed", {
+              finishedAt,
+              errorSummary: message,
+            });
+          } catch (cleanupError) {
+            logger.error({ err: cleanupError, taskId }, "failed to update task status during cleanup");
+          }
+
+          try {
+            appendEvent("error", message, finishedAt);
+          } catch (cleanupError) {
+            logger.error({ err: cleanupError, taskId }, "failed to append task error event during cleanup");
+          }
+
+          try {
+            runtimeStore.replaceTaskArtifacts(taskId, []);
+          } catch (cleanupError) {
+            logger.error({ err: cleanupError, taskId }, "failed to clear task artifacts during cleanup");
+          }
+        }
         logger.error({ err: error, taskId, sessionKey, chatId }, "task failed");
         throw error;
       } finally {

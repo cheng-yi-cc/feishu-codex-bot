@@ -153,4 +153,45 @@ describe("createCodexRunner", () => {
       }),
     ).rejects.toThrow(/timed out/);
   });
+
+  it("does not emit late events after an aborted run has already finished", async () => {
+    const child = createFakeChild();
+    const runner = createCodexRunner(
+      {
+        codexBin: "codex",
+        sandboxMode: "danger-full-access",
+        defaultWorkdir: "C:\\tmp",
+        timeoutMs: 1000,
+      },
+      (() => child as any) as any,
+    );
+
+    const controller = new AbortController();
+    const emitted: string[] = [];
+
+    const runPromise = runner.run({
+      sessionKey: "s1",
+      prompt: "hello",
+      workdir: "C:\\tmp",
+      timeoutMs: 1000,
+      abortSignal: controller.signal,
+      onEvent: (event) => {
+        emitted.push(event.type);
+      },
+    });
+
+    controller.abort();
+
+    setTimeout(() => {
+      child.stdout.write(
+        '{"type":"item.completed","item":{"type":"agent_message","text":"late"}}\n',
+      );
+      child.emit("close", 0);
+    }, 10);
+
+    await expect(runPromise).rejects.toThrow(/aborted/);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(emitted).toEqual([]);
+  });
 });

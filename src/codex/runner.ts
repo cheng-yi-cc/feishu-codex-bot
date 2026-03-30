@@ -139,6 +139,10 @@ export function createCodexRunner(
         let finished = false;
         let abortHandler: (() => void) | undefined;
 
+        const finish = () => {
+          finished = true;
+        };
+
         const cleanup = () => {
           if (abortHandler && request.abortSignal) {
             request.abortSignal.removeEventListener("abort", abortHandler);
@@ -147,7 +151,7 @@ export function createCodexRunner(
 
         const timeout = setTimeout(() => {
           if (!finished) {
-            finished = true;
+            finish();
             cleanup();
             child.kill();
             reject(new Error(`codex execution timed out after ${timeoutMs}ms`));
@@ -160,7 +164,7 @@ export function createCodexRunner(
               return;
             }
 
-            finished = true;
+            finish();
             clearTimeout(timeout);
             cleanup();
             child.kill();
@@ -176,9 +180,15 @@ export function createCodexRunner(
         }
 
         child.stdout.on("data", (chunk: Buffer) => {
+          if (finished) {
+            return;
+          }
           stdoutBuffer += chunk.toString("utf8");
           let idx = stdoutBuffer.indexOf("\n");
           while (idx >= 0) {
+            if (finished) {
+              return;
+            }
             const line = stdoutBuffer.slice(0, idx);
             applyCodexJsonLine(line, state, request.onEvent);
             stdoutBuffer = stdoutBuffer.slice(idx + 1);
@@ -195,13 +205,20 @@ export function createCodexRunner(
         child.on("error", (err) => {
           clearTimeout(timeout);
           cleanup();
+          finish();
           reject(err);
         });
 
         child.on("close", (code) => {
+          if (finished) {
+            clearTimeout(timeout);
+            cleanup();
+            return;
+          }
+
           clearTimeout(timeout);
           cleanup();
-          finished = true;
+          finish();
           if (stdoutBuffer.trim()) {
             applyCodexJsonLine(stdoutBuffer, state, request.onEvent);
           }
