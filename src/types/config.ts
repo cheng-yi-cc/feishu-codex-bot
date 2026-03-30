@@ -15,17 +15,11 @@ export type BotConfig = {
   codexDefaultModel?: string;
   codexDefaultThinkingLevel: "low" | "medium" | "high";
   dbPath: string;
-  logDir?: string;
+  logDir: string;
   logLevel: LogLevel;
   healthPort: number;
   replyChunkChars: number;
   dedupRetentionMs: number;
-  supervisorMaxRestarts?: number;
-  supervisorRestartDelayMs?: number;
-};
-
-export type ResolvedBotConfig = BotConfig & {
-  logDir: string;
   supervisorMaxRestarts: number;
   supervisorRestartDelayMs: number;
 };

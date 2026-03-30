@@ -160,6 +160,8 @@ function makeConfig(): BotConfig {
     healthPort: 8787,
     replyChunkChars: 3200,
     dedupRetentionMs: 1000,
+    supervisorMaxRestarts: 5,
+    supervisorRestartDelayMs: 3000,
   };
 }
 

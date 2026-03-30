@@ -34,10 +34,13 @@ function makeConfig(): BotConfig {
     codexDefaultModel: "gpt-5",
     codexDefaultThinkingLevel: "medium",
     dbPath: "./data/test.sqlite",
+    logDir: path.join("C:\\tmp", "logs"),
     logLevel: "info",
     healthPort: 8787,
     replyChunkChars: 3200,
     dedupRetentionMs: 1000,
+    supervisorMaxRestarts: 5,
+    supervisorRestartDelayMs: 3000,
   };
 }
 

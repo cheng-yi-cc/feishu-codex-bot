@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { Logger } from "pino";
-import type { ResolvedBotConfig } from "../types/config.js";
+import type { BotConfig } from "../types/config.js";
 
 export type AppSupervisorHandle = {
   stop: () => Promise<void>;
@@ -13,7 +13,7 @@ export type AppSupervisorSnapshot = {
 
 export function createAppSupervisor(input: {
   logger: Logger;
-  config: ResolvedBotConfig;
+  config: BotConfig;
   verifyBinary?: (value: string) => Promise<boolean>;
   startApplication: () => Promise<AppSupervisorHandle>;
 }) {

@@ -2,7 +2,7 @@ import { config as loadDotenv } from "dotenv";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import type { LogLevel, ResolvedBotConfig } from "./types/config.js";
+import type { BotConfig, LogLevel } from "./types/config.js";
 
 loadDotenv();
 
@@ -69,7 +69,7 @@ function parseAllowOpenIds(raw: string): Set<string> {
   );
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): ResolvedBotConfig {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     throw new Error(

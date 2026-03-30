@@ -1,6 +1,7 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import type { BotConfig } from "../src/types/config.js";
 
 const baseEnv = {
   FEISHU_APP_ID: "cli_test",
@@ -8,6 +9,12 @@ const baseEnv = {
 };
 
 describe("loadConfig", () => {
+  it("exposes resolved runtime fields directly on BotConfig", () => {
+    expectTypeOf<BotConfig["logDir"]>().toEqualTypeOf<string>();
+    expectTypeOf<BotConfig["supervisorMaxRestarts"]>().toEqualTypeOf<number>();
+    expectTypeOf<BotConfig["supervisorRestartDelayMs"]>().toEqualTypeOf<number>();
+  });
+
   it("loads defaults", () => {
     const cfg = loadConfig(baseEnv);
 
