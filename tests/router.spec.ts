@@ -32,6 +32,18 @@ describe("resolveIntent", () => {
     });
   });
 
+  it("routes bare /ask without attachments to a usage response", () => {
+    const message = makeMessage("/ask");
+    const command = parseCommand(message, "/ask");
+    expect(
+      resolveIntent({
+        message,
+        command,
+        workspaceMode: "chat",
+      }),
+    ).toEqual({ kind: "reply.usage" });
+  });
+
   it("routes attachment-only asks to the attachment fallback prompt", () => {
     const message = {
       ...makeMessage(""),

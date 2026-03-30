@@ -16,6 +16,18 @@ function buildAskPrompt(message: IncomingMessage, prompt: string): string {
   return "";
 }
 
+function resolveAskIntent(message: IncomingMessage, prompt: string, workspaceMode: WorkspaceMode): UserIntent {
+  const resolvedPrompt = buildAskPrompt(message, prompt);
+  if (resolvedPrompt.length === 0) {
+    return { kind: "reply.usage" };
+  }
+  return {
+    kind: "task.start",
+    taskKind: workspaceMode === "dev" ? "dev" : "chat",
+    prompt: resolvedPrompt,
+  };
+}
+
 function toModeIntent(command: Extract<ParsedCommand, { kind: "mode" }>): Extract<UserIntent, { kind: "workspace.mode" }> {
   return command.action === "set"
     ? { kind: "workspace.mode", action: command.action, mode: command.mode }
@@ -63,10 +75,9 @@ export function resolveIntent(input: {
   if (command.kind === "abort") return { kind: "workspace.command", command: "abort" };
   if (command.kind === "model") return toModelIntent(command);
   if (command.kind === "think") return toThinkIntent(command);
+  if (command.kind === "ask") {
+    return resolveAskIntent(input.message, command.prompt, workspaceMode);
+  }
 
-  return {
-    kind: "task.start",
-    taskKind: workspaceMode === "dev" ? "dev" : "chat",
-    prompt: buildAskPrompt(input.message, command.prompt),
-  };
+  return { kind: "noop" };
 }

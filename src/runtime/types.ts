@@ -9,6 +9,7 @@ export type UserIntent =
   | { kind: "workspace.cwd"; path?: string }
   | { kind: "workspace.command"; command: "run" | "test" | "diff" | "files" | "logs" | "branch" | "apply" | "abort"; value?: string }
   | { kind: "reply.status" }
+  | { kind: "reply.usage" }
   | { kind: "reply.model"; action: "show" | "reset" | "set" | "invalid"; model?: string; invalidArg?: string }
   | { kind: "reply.think"; action: "show" | "reset" | "set" | "invalid"; level?: "low" | "medium" | "high"; invalidArg?: string }
   | { kind: "session.reset" }
