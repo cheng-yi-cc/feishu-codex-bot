@@ -96,7 +96,9 @@ Register the startup task with:
 powershell -ExecutionPolicy Bypass -File .\scripts\install-startup-task.ps1
 ```
 
-After registration, verify `GET /healthz` returns the expected `codexWorkdir`, `logDir`, and `supervisor.restartCount`. The startup task is configured to ignore duplicate launches and to run without the default task execution time limit.
+The installer first tries to register a Windows Task Scheduler entry. If the current account lacks permission to create scheduled tasks, it falls back to a shortcut in the current user's Startup folder.
+
+After registration, verify `GET /healthz` returns the expected `codexWorkdir`, `logDir`, and `supervisor.restartCount`. When Task Scheduler registration succeeds, the task is configured to ignore duplicate launches and to run without the default task execution time limit.
 
 ## Commands in Feishu
 

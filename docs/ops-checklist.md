@@ -9,7 +9,7 @@
 - `FEISHU_ALLOW_OPEN_IDS` contains intended pilot users
 - `start-bot.ps1` points at this checkout and `dist/index.js` is buildable
 - `node.exe` and `npm.cmd` resolve successfully from the account that will run the startup task
-- Startup task installed with `scripts/install-startup-task.ps1` when running as a boot service
+- Startup install completed with `scripts/install-startup-task.ps1` (Task Scheduler when permitted, otherwise a Startup folder shortcut)
 
 ## Start Verification
 
@@ -48,7 +48,8 @@
 - rerun `.\start-bot.ps1` manually from PowerShell
 - inspect `logs/start-bot.log` for command resolution, build, or duplicate-process skips
 - confirm `dist/index.js` exists after build
-- open Task Scheduler history for `FeishuCodexWorkspaceBot`
+- if Task Scheduler mode was used, open Task Scheduler history for `FeishuCodexWorkspaceBot`
+- if Startup shortcut mode was used, check `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\FeishuCodexWorkspaceBot.lnk`
 
 ## Rollback
 
