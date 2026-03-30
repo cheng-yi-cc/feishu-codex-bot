@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS workspace_state (
   branch TEXT,
   last_task_id TEXT,
   last_error_summary TEXT,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -52,7 +53,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   started_at INTEGER,
   finished_at INTEGER,
   summary TEXT,
-  error_summary TEXT
+  error_summary TEXT,
+  FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_session_created
@@ -64,7 +66,8 @@ CREATE TABLE IF NOT EXISTS task_events (
   phase TEXT NOT NULL CHECK (phase IN ('queued', 'progress', 'result', 'error')),
   message TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  PRIMARY KEY (task_id, seq)
+  PRIMARY KEY (task_id, seq),
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS task_artifacts (
@@ -72,5 +75,6 @@ CREATE TABLE IF NOT EXISTS task_artifacts (
   kind TEXT NOT NULL CHECK (kind IN ('diff', 'log', 'file', 'command_output')),
   label TEXT NOT NULL,
   value TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );

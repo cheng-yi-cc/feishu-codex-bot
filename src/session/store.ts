@@ -137,6 +137,20 @@ export class SQLiteSessionStore implements SessionStore, RuntimeStore {
 
   public resetSession(sessionKey: string): void {
     const tx = this.db.transaction((key: string) => {
+      this.db
+        .prepare(
+          `DELETE FROM task_artifacts
+           WHERE task_id IN (SELECT id FROM tasks WHERE session_key = ?)`,
+        )
+        .run(key);
+      this.db
+        .prepare(
+          `DELETE FROM task_events
+           WHERE task_id IN (SELECT id FROM tasks WHERE session_key = ?)`,
+        )
+        .run(key);
+      this.db.prepare("DELETE FROM tasks WHERE session_key = ?").run(key);
+      this.db.prepare("DELETE FROM workspace_state WHERE session_key = ?").run(key);
       this.db.prepare("DELETE FROM messages WHERE session_key = ?").run(key);
       this.db.prepare("DELETE FROM session_options WHERE session_key = ?").run(key);
       this.db.prepare("DELETE FROM sessions WHERE session_key = ?").run(key);
@@ -146,6 +160,9 @@ export class SQLiteSessionStore implements SessionStore, RuntimeStore {
 
   public saveWorkspaceState(state: WorkspaceState): void {
     const tx = this.db.transaction((workspaceState: WorkspaceState) => {
+      this.db
+        .prepare("INSERT OR IGNORE INTO sessions (session_key, created_at) VALUES (?, ?)")
+        .run(workspaceState.sessionKey, workspaceState.updatedAt);
       this.db
         .prepare(
           `INSERT INTO workspace_state (
@@ -198,26 +215,33 @@ export class SQLiteSessionStore implements SessionStore, RuntimeStore {
   }
 
   public createTask(task: TaskRecord): void {
-    this.db
-      .prepare(
-        `INSERT INTO tasks (
-           id, session_key, kind, title, input_text, status,
-           created_at, started_at, finished_at, summary, error_summary
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        task.id,
-        task.sessionKey,
-        task.kind,
-        task.title,
-        task.inputText,
-        task.status,
-        task.createdAt,
-        task.startedAt ?? null,
-        task.finishedAt ?? null,
-        task.summary ?? null,
-        task.errorSummary ?? null,
-      );
+    const tx = this.db.transaction((newTask: TaskRecord) => {
+      this.db
+        .prepare("INSERT OR IGNORE INTO sessions (session_key, created_at) VALUES (?, ?)")
+        .run(newTask.sessionKey, newTask.createdAt);
+      this.db
+        .prepare(
+          `INSERT INTO tasks (
+             id, session_key, kind, title, input_text, status,
+             created_at, started_at, finished_at, summary, error_summary
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          newTask.id,
+          newTask.sessionKey,
+          newTask.kind,
+          newTask.title,
+          newTask.inputText,
+          newTask.status,
+          newTask.createdAt,
+          newTask.startedAt ?? null,
+          newTask.finishedAt ?? null,
+          newTask.summary ?? null,
+          newTask.errorSummary ?? null,
+        );
+    });
+
+    tx(task);
   }
 
   public getTask(taskId: string): TaskRecord | undefined {
@@ -260,21 +284,21 @@ export class SQLiteSessionStore implements SessionStore, RuntimeStore {
     const assignments: string[] = ["status = ?"];
     const values: unknown[] = [status];
 
-    if (updates.startedAt !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(updates, "startedAt")) {
       assignments.push("started_at = ?");
-      values.push(updates.startedAt);
+      values.push(updates.startedAt ?? null);
     }
-    if (updates.finishedAt !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(updates, "finishedAt")) {
       assignments.push("finished_at = ?");
-      values.push(updates.finishedAt);
+      values.push(updates.finishedAt ?? null);
     }
-    if (updates.summary !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(updates, "summary")) {
       assignments.push("summary = ?");
-      values.push(updates.summary);
+      values.push(updates.summary ?? null);
     }
-    if (updates.errorSummary !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(updates, "errorSummary")) {
       assignments.push("error_summary = ?");
-      values.push(updates.errorSummary);
+      values.push(updates.errorSummary ?? null);
     }
 
     values.push(taskId);
