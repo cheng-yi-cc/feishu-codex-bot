@@ -11,7 +11,7 @@ import { addTypingIndicator, removeTypingIndicator } from "../feishu/typing.js";
 import { enforceAccessPolicy } from "./access-control.js";
 import { parseCommand } from "./commands.js";
 import { resolveIntent } from "./router.js";
-import { renderProgressReply, renderResumeReply, renderStatusReply } from "./response-renderer.js";
+import { renderProgressReply, renderResumeReply, renderStatusReply, renderUsageReply } from "./response-renderer.js";
 import { SerialTaskQueue } from "./queue.js";
 
 export type RuntimeStatus = {
@@ -68,28 +68,41 @@ function createFallbackCodexRunner(
   store: SessionStore,
   config: BotConfig,
   logger: Logger,
-): CodexRunner {
+): { runner: CodexRunner; getRetryNotice: () => string | undefined } {
+  let retryNotice: string | undefined;
   return {
-    async run(request) {
-      try {
-        return await codexRunner.run(request);
-      } catch (error) {
-        if (!request.model || !isUnsupportedModelError(error)) {
-          throw error;
-        }
+    runner: {
+      async run(request) {
+        try {
+          return await codexRunner.run(request);
+        } catch (error) {
+          if (!request.model || !isUnsupportedModelError(error)) {
+            throw error;
+          }
 
-        logger.warn(
-          { sessionKey: request.sessionKey, model: request.model },
-          "configured model appears unsupported, fallback to default model",
-        );
-        store.setSessionModel(request.sessionKey, undefined);
-        return codexRunner.run({
-          ...request,
-          model: config.codexDefaultModel,
-        });
-      }
+          logger.warn(
+            { sessionKey: request.sessionKey, model: request.model },
+            "configured model appears unsupported, fallback to default model",
+          );
+          store.setSessionModel(request.sessionKey, undefined);
+          retryNotice = `模型 ${request.model} 不可用，已切回默认模型并重试。`;
+          return codexRunner.run({
+            ...request,
+            model: config.codexDefaultModel,
+          });
+        }
+      },
     },
+    getRetryNotice: () => retryNotice,
   };
+}
+
+function isResumableTaskStatus(status: string): status is "interrupted" | "resumable" {
+  return status === "interrupted" || status === "resumable";
+}
+
+function findLatestResumableTask(store: RuntimeStore, sessionKey: string) {
+  return store.listRecentTasks(sessionKey, 20).find((task) => isResumableTaskStatus(task.status));
 }
 
 function formatSessionOptionsForUser(options: EffectiveSessionOptions): string[] {
@@ -162,13 +175,6 @@ async function sendAssistantDirectives(
 
 export function createMessageHandler(deps: HandlerDeps) {
   const { config, logger, store, codexRunner, queue, runtimeStatus } = deps;
-  const orchestrator = createTaskOrchestrator({
-    logger,
-    config,
-    sessionStore: store,
-    runtimeStore: store,
-    codexRunner: createFallbackCodexRunner(codexRunner, store, config, logger),
-  });
 
   return async function handleMessage(message: IncomingMessage): Promise<void> {
     if (store.isDuplicate(message.messageId)) {
@@ -229,8 +235,13 @@ export function createMessageHandler(deps: HandlerDeps) {
       return;
     }
 
+    if (intent.kind === "reply.usage") {
+      await sendTextReply(deps, message, renderUsageReply());
+      return;
+    }
+
     if (intent.kind === "workspace.resume") {
-      const latestTask = workspace?.lastTaskId ? store.getTask(workspace.lastTaskId) : undefined;
+      const latestTask = findLatestResumableTask(store, sessionKey);
       const events = latestTask ? store.loadTaskEvents(latestTask.id, 10) : [];
       await sendTextReply(deps, message, renderResumeReply(latestTask, events));
       return;
@@ -314,6 +325,14 @@ export function createMessageHandler(deps: HandlerDeps) {
     await queue.enqueue(async () => {
       const downloadedAttachments: DownloadedAttachment[] = [];
       try {
+        const fallback = createFallbackCodexRunner(codexRunner, store, config, logger);
+        const orchestrator = createTaskOrchestrator({
+          logger,
+          config,
+          sessionStore: store,
+          runtimeStore: store,
+          codexRunner: fallback.runner,
+        });
         for (const attachment of message.attachments) {
           const local = await downloadIncomingAttachment({
             client: deps.feishuClient,
@@ -349,6 +368,11 @@ export function createMessageHandler(deps: HandlerDeps) {
           taskKind: intent.taskKind,
           imagePaths,
         });
+
+        const retryNotice = fallback.getRetryNotice();
+        if (retryNotice) {
+          await sendTextReply(deps, message, retryNotice);
+        }
 
         const taskEvents = store
           .loadTaskEvents(result.taskId, 10)

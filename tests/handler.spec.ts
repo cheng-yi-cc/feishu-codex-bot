@@ -274,6 +274,50 @@ describe("createMessageHandler", () => {
     expect(reply.mock.calls.length + create.mock.calls.length).toBeGreaterThan(0);
   });
 
+  it("returns usage for bare /ask", async () => {
+    const store = new MemoryStore();
+    const queue = new SerialTaskQueue();
+    const create = vi.fn(async () => ({ code: 0 }));
+
+    const handler = createMessageHandler({
+      config: makeConfig(),
+      logger: pino({ enabled: false }),
+      store,
+      codexRunner: {
+        run: vi.fn(async () => ({ answer: "unused", durationMs: 1 })),
+      },
+      queue,
+      feishuClient: {
+        im: {
+          message: {
+            reply: vi.fn(async () => ({ code: 0 })),
+            create,
+          },
+        },
+      } as any,
+      runtimeStatus: { startedAt: Date.now(), lastErrorAt: null },
+    });
+
+    await handler({
+      messageId: "m_usage",
+      chatId: "oc_dm",
+      chatType: "p2p",
+      senderOpenId: "ou_allow",
+      messageType: "text",
+      text: "/ask",
+      mentionedBot: false,
+      attachments: [],
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: expect.stringContaining("用法: /ask 你的问题"),
+        }),
+      }),
+    );
+  });
+
   it("renders workspace status with mode, cwd, and latest task", async () => {
     const store = new MemoryStore();
     store.saveWorkspaceState({
@@ -347,9 +391,22 @@ describe("createMessageHandler", () => {
       mode: "dev",
       cwd: "D:\\My Project\\feishu-codex-bot",
       branch: "main",
-      lastTaskId: "task_resume",
+      lastTaskId: "task_complete",
       lastErrorSummary: undefined,
       updatedAt: Date.now(),
+    });
+    store.createTask({
+      id: "task_complete",
+      sessionKey: "dm:ou_allow",
+      kind: "dev",
+      title: "Completed last",
+      inputText: "已完成",
+      status: "completed",
+      createdAt: Date.now() + 10,
+      startedAt: Date.now() + 11,
+      finishedAt: Date.now() + 12,
+      summary: "done",
+      errorSummary: undefined,
     });
     store.createTask({
       id: "task_resume",
@@ -369,6 +426,20 @@ describe("createMessageHandler", () => {
       seq: 1,
       phase: "progress",
       message: "Launching Codex",
+      createdAt: Date.now(),
+    });
+    store.appendTaskEvent({
+      taskId: "task_resume",
+      seq: 2,
+      phase: "error",
+      message: "Raw error event",
+      createdAt: Date.now(),
+    });
+    store.appendTaskEvent({
+      taskId: "task_resume",
+      seq: 3,
+      phase: "result",
+      message: "Raw result event",
       createdAt: Date.now(),
     });
 
@@ -404,13 +475,16 @@ describe("createMessageHandler", () => {
       attachments: [],
     });
 
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          content: expect.stringContaining("最近中断任务"),
-        }),
-      }),
-    );
+    const firstCall = create.mock.calls[0] as unknown as [unknown] | undefined;
+    const content = JSON.parse(
+      ((firstCall?.[0] as { data?: { content?: string } } | undefined)?.data?.content ?? "{}"),
+    ).text as string;
+    expect(content).toContain("最近中断任务");
+    expect(content).toContain("Resume me");
+    expect(content).toContain("Launching Codex");
+    expect(content).not.toContain("Completed last");
+    expect(content).not.toContain("Raw error event");
+    expect(content).not.toContain("Raw result event");
   });
 
   it("renders progress updates after a task starts", async () => {
@@ -764,7 +838,12 @@ describe("createMessageHandler", () => {
     expect(run.mock.calls[0]?.[0]).toMatchObject({ model: "bad-model" });
     expect(run.mock.calls[1]?.[0]).toMatchObject({ model: "gpt-5" });
     expect(store.getSessionOptions("dm:ou_allow").model).toBeUndefined();
-    expect(create).toHaveBeenCalled();
+    const fallbackCalls = create.mock.calls as unknown as Array<[unknown]>;
+    expect(
+      fallbackCalls.some(([options]) =>
+        (options as { data?: { content?: string } }).data?.content?.includes("已切回默认模型并重试"),
+      ),
+    ).toBe(true);
   });
 
   it("ignores group ask without mention when requireMention=true", async () => {

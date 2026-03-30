@@ -1,5 +1,9 @@
 import type { TaskEventRecord, TaskRecord, WorkspaceState } from "../runtime/types.js";
 
+export function renderUsageReply(): string {
+  return "用法: /ask 你的问题";
+}
+
 export function renderStatusReply(input: {
   workspace?: WorkspaceState;
   latestTask?: TaskRecord;
@@ -37,6 +41,8 @@ export function renderResumeReply(task: TaskRecord | undefined, events: TaskEven
     return "没有可恢复的最近任务。";
   }
 
+  const progressEvents = events.filter((event) => event.phase === "progress");
+
   const lines = [
     "最近中断任务",
     `- 标题: ${task.title}`,
@@ -44,7 +50,7 @@ export function renderResumeReply(task: TaskRecord | undefined, events: TaskEven
     `- 原因: ${task.errorSummary ?? "未知"}`,
   ];
 
-  for (const event of events.slice(-3)) {
+  for (const event of progressEvents.slice(-3)) {
     lines.push(`- 进度: ${event.message}`);
   }
 
