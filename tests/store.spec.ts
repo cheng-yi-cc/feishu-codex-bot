@@ -28,8 +28,6 @@ describe("SQLiteSessionStore", () => {
 
     store.resetSession("dm:ou_a");
     expect(store.loadRecent("dm:ou_a", 2)).toEqual([]);
-    expect(store.getWorkspaceState("dm:ou_a")).toBeUndefined();
-    expect(store.listRecentTasks("dm:ou_a", 5)).toEqual([]);
 
     db.close();
     fs.rmSync(dbPath, { force: true });

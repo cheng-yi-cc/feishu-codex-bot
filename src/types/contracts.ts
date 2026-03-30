@@ -1,5 +1,3 @@
-import type { RuntimeStore } from "../runtime/types.js";
-
 export type IncomingAttachment = {
   type: "image" | "file";
   fileKey: string;
@@ -47,7 +45,7 @@ export type SessionOptions = {
   thinkingLevel?: "low" | "medium" | "high";
 };
 
-export interface SessionStore extends RuntimeStore {
+export interface SessionStore {
   isDuplicate(messageId: string): boolean;
   appendUser(sessionKey: string, content: string): void;
   appendAssistant(sessionKey: string, content: string): void;
