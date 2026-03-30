@@ -487,6 +487,97 @@ describe("createMessageHandler", () => {
     expect(content).not.toContain("Raw result event");
   });
 
+  it("finds the latest resumable task even when more than twenty newer tasks exist", async () => {
+    const store = new MemoryStore();
+    const baseTime = Date.now();
+
+    store.saveWorkspaceState({
+      sessionKey: "dm:ou_allow",
+      mode: "dev",
+      cwd: "D:\\My Project\\feishu-codex-bot",
+      branch: "main",
+      lastTaskId: "task_complete_20",
+      lastErrorSummary: undefined,
+      updatedAt: baseTime + 100,
+    });
+
+    store.createTask({
+      id: "task_resume_far_back",
+      sessionKey: "dm:ou_allow",
+      kind: "dev",
+      title: "Older interrupted task",
+      inputText: "继续修复",
+      status: "interrupted",
+      createdAt: baseTime,
+      startedAt: baseTime + 1,
+      finishedAt: baseTime + 2,
+      summary: undefined,
+      errorSummary: "process exited",
+    });
+    store.appendTaskEvent({
+      taskId: "task_resume_far_back",
+      seq: 1,
+      phase: "progress",
+      message: "Resume progress",
+      createdAt: baseTime + 3,
+    });
+
+    for (let index = 0; index < 21; index += 1) {
+      store.createTask({
+        id: `task_complete_${index}`,
+        sessionKey: "dm:ou_allow",
+        kind: "dev",
+        title: `Completed ${index}`,
+        inputText: "已完成",
+        status: "completed",
+        createdAt: baseTime + 10 + index,
+        startedAt: baseTime + 11 + index,
+        finishedAt: baseTime + 12 + index,
+        summary: "done",
+        errorSummary: undefined,
+      });
+    }
+
+    const queue = new SerialTaskQueue();
+    const create = vi.fn(async () => ({ code: 0 }));
+    const handler = createMessageHandler({
+      config: makeConfig(),
+      logger: pino({ enabled: false }),
+      store,
+      codexRunner: {
+        run: vi.fn(async () => ({ answer: "unused", durationMs: 1 })),
+      },
+      queue,
+      feishuClient: {
+        im: {
+          message: {
+            reply: vi.fn(async () => ({ code: 0 })),
+            create,
+          },
+        },
+      } as any,
+      runtimeStatus: { startedAt: baseTime, lastErrorAt: null },
+    });
+
+    await handler({
+      messageId: "m_resume_far_back",
+      chatId: "oc_dm",
+      chatType: "p2p",
+      senderOpenId: "ou_allow",
+      messageType: "text",
+      text: "/resume",
+      mentionedBot: false,
+      attachments: [],
+    });
+
+    const firstCall = create.mock.calls[0] as unknown as [unknown] | undefined;
+    const content = JSON.parse(
+      ((firstCall?.[0] as { data?: { content?: string } } | undefined)?.data?.content ?? "{}"),
+    ).text as string;
+    expect(content).toContain("Older interrupted task");
+    expect(content).toContain("Resume progress");
+  });
+
   it("renders progress updates after a task starts", async () => {
     const store = new MemoryStore();
     const queue = new SerialTaskQueue();

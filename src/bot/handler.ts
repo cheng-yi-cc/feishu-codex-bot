@@ -102,7 +102,20 @@ function isResumableTaskStatus(status: string): status is "interrupted" | "resum
 }
 
 function findLatestResumableTask(store: RuntimeStore, sessionKey: string) {
-  return store.listRecentTasks(sessionKey, 20).find((task) => isResumableTaskStatus(task.status));
+  let limit = 20;
+
+  while (true) {
+    const tasks = store.listRecentTasks(sessionKey, limit);
+    const match = tasks.find((task) => isResumableTaskStatus(task.status));
+    if (match) {
+      return match;
+    }
+    if (tasks.length < limit || limit >= Number.MAX_SAFE_INTEGER) {
+      return undefined;
+    }
+
+    limit = Math.min(limit * 2, Number.MAX_SAFE_INTEGER);
+  }
 }
 
 function formatSessionOptionsForUser(options: EffectiveSessionOptions): string[] {
