@@ -45,6 +45,10 @@ export async function sendReplyInChunks(options: SendReplyOptions): Promise<void
   }
 }
 
+export async function sendTextReply(options: SendReplyOptions): Promise<void> {
+  await sendReplyInChunks(options);
+}
+
 function fileTypeFromPath(localPath: string): "opus" | "mp4" | "pdf" | "doc" | "xls" | "ppt" | "stream" {
   const ext = path.extname(localPath).toLowerCase();
   if (ext === ".opus" || ext === ".ogg" || ext === ".mp3" || ext === ".wav" || ext === ".m4a") {

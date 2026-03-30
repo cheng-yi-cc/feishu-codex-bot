@@ -2,13 +2,24 @@
 import pino from "pino";
 import { createMessageHandler } from "../src/bot/handler.js";
 import { SerialTaskQueue } from "../src/bot/queue.js";
+import type {
+  RuntimeStore,
+  TaskArtifactRecord,
+  TaskEventRecord,
+  TaskRecord,
+  WorkspaceState,
+} from "../src/runtime/types.js";
 import type { BotConfig } from "../src/types/config.js";
 import type { SessionMessage, SessionOptions, SessionStore } from "../src/types/contracts.js";
 
-class MemoryStore implements SessionStore {
+class MemoryStore implements SessionStore, RuntimeStore {
   public readonly dedup = new Set<string>();
   public readonly sessions = new Map<string, SessionMessage[]>();
   public readonly options = new Map<string, SessionOptions>();
+  public readonly workspace = new Map<string, WorkspaceState>();
+  public readonly tasks = new Map<string, TaskRecord>();
+  public readonly events = new Map<string, TaskEventRecord[]>();
+  public readonly artifacts = new Map<string, TaskArtifactRecord[]>();
 
   public isDuplicate(messageId: string): boolean {
     if (this.dedup.has(messageId)) return true;
@@ -31,6 +42,14 @@ class MemoryStore implements SessionStore {
   public resetSession(sessionKey: string): void {
     this.sessions.delete(sessionKey);
     this.options.delete(sessionKey);
+    this.workspace.delete(sessionKey);
+    for (const [taskId, task] of this.tasks.entries()) {
+      if (task.sessionKey === sessionKey) {
+        this.tasks.delete(taskId);
+        this.events.delete(taskId);
+        this.artifacts.delete(taskId);
+      }
+    }
   }
 
   public getSessionOptions(sessionKey: string): SessionOptions {
@@ -45,6 +64,59 @@ class MemoryStore implements SessionStore {
   public setSessionThinkingLevel(sessionKey: string, thinkingLevel?: "low" | "medium" | "high"): void {
     const current = this.options.get(sessionKey) ?? {};
     this.options.set(sessionKey, { ...current, thinkingLevel });
+  }
+
+  public saveWorkspaceState(state: WorkspaceState): void {
+    this.workspace.set(state.sessionKey, state);
+  }
+
+  public getWorkspaceState(sessionKey: string): WorkspaceState | undefined {
+    return this.workspace.get(sessionKey);
+  }
+
+  public createTask(task: TaskRecord): void {
+    this.tasks.set(task.id, task);
+  }
+
+  public getTask(taskId: string): TaskRecord | undefined {
+    return this.tasks.get(taskId);
+  }
+
+  public listRecentTasks(sessionKey: string, limit: number): TaskRecord[] {
+    return [...this.tasks.values()]
+      .filter((task) => task.sessionKey === sessionKey)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, Math.max(1, limit));
+  }
+
+  public updateTaskStatus(
+    taskId: string,
+    status: TaskRecord["status"],
+    updates: Partial<Pick<TaskRecord, "startedAt" | "finishedAt" | "summary" | "errorSummary">> = {},
+  ): void {
+    const current = this.tasks.get(taskId);
+    if (!current) {
+      return;
+    }
+    this.tasks.set(taskId, { ...current, status, ...updates });
+  }
+
+  public appendTaskEvent(event: TaskEventRecord): void {
+    const current = this.events.get(event.taskId) ?? [];
+    current.push(event);
+    this.events.set(event.taskId, current);
+  }
+
+  public loadTaskEvents(taskId: string, limit: number): TaskEventRecord[] {
+    return [...(this.events.get(taskId) ?? [])].slice(-Math.max(1, limit));
+  }
+
+  public replaceTaskArtifacts(taskId: string, artifacts: TaskArtifactRecord[]): void {
+    this.artifacts.set(taskId, [...artifacts]);
+  }
+
+  public listTaskArtifacts(taskId: string): TaskArtifactRecord[] {
+    return [...(this.artifacts.get(taskId) ?? [])];
   }
 
   private append(sessionKey: string, role: "user" | "assistant", content: string): void {
@@ -200,6 +272,208 @@ describe("createMessageHandler", () => {
       { role: "assistant", content: "你好" },
     ]);
     expect(reply.mock.calls.length + create.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("renders workspace status with mode, cwd, and latest task", async () => {
+    const store = new MemoryStore();
+    store.saveWorkspaceState({
+      sessionKey: "dm:ou_allow",
+      mode: "dev",
+      cwd: "D:\\My Project\\feishu-codex-bot",
+      branch: "main",
+      lastTaskId: "task_status",
+      lastErrorSummary: undefined,
+      updatedAt: Date.now(),
+    });
+    store.createTask({
+      id: "task_status",
+      sessionKey: "dm:ou_allow",
+      kind: "dev",
+      title: "Fix startup",
+      inputText: "修复启动脚本",
+      status: "interrupted",
+      createdAt: Date.now(),
+      startedAt: undefined,
+      finishedAt: undefined,
+      summary: undefined,
+      errorSummary: "node exited",
+    });
+
+    const queue = new SerialTaskQueue();
+    const create = vi.fn(async () => ({ code: 0 }));
+    const handler = createMessageHandler({
+      config: makeConfig(),
+      logger: pino({ enabled: false }),
+      store,
+      codexRunner: {
+        run: vi.fn(async () => ({ answer: "unused", durationMs: 1 })),
+      },
+      queue,
+      feishuClient: {
+        im: {
+          message: {
+            reply: vi.fn(async () => ({ code: 0 })),
+            create,
+          },
+        },
+      } as any,
+      runtimeStatus: { startedAt: Date.now(), lastErrorAt: null },
+    });
+
+    await handler({
+      messageId: "m_status",
+      chatId: "oc_dm",
+      chatType: "p2p",
+      senderOpenId: "ou_allow",
+      messageType: "text",
+      text: "/status",
+      mentionedBot: false,
+      attachments: [],
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: expect.stringContaining("模式: dev"),
+        }),
+      }),
+    );
+  });
+
+  it("returns the last interrupted task on /resume", async () => {
+    const store = new MemoryStore();
+    store.saveWorkspaceState({
+      sessionKey: "dm:ou_allow",
+      mode: "dev",
+      cwd: "D:\\My Project\\feishu-codex-bot",
+      branch: "main",
+      lastTaskId: "task_resume",
+      lastErrorSummary: undefined,
+      updatedAt: Date.now(),
+    });
+    store.createTask({
+      id: "task_resume",
+      sessionKey: "dm:ou_allow",
+      kind: "dev",
+      title: "Resume me",
+      inputText: "继续修复",
+      status: "interrupted",
+      createdAt: Date.now(),
+      startedAt: undefined,
+      finishedAt: undefined,
+      summary: undefined,
+      errorSummary: "process exited",
+    });
+    store.appendTaskEvent({
+      taskId: "task_resume",
+      seq: 1,
+      phase: "progress",
+      message: "Launching Codex",
+      createdAt: Date.now(),
+    });
+
+    const queue = new SerialTaskQueue();
+    const create = vi.fn(async () => ({ code: 0 }));
+    const handler = createMessageHandler({
+      config: makeConfig(),
+      logger: pino({ enabled: false }),
+      store,
+      codexRunner: {
+        run: vi.fn(async () => ({ answer: "unused", durationMs: 1 })),
+      },
+      queue,
+      feishuClient: {
+        im: {
+          message: {
+            reply: vi.fn(async () => ({ code: 0 })),
+            create,
+          },
+        },
+      } as any,
+      runtimeStatus: { startedAt: Date.now(), lastErrorAt: null },
+    });
+
+    await handler({
+      messageId: "m_resume",
+      chatId: "oc_dm",
+      chatType: "p2p",
+      senderOpenId: "ou_allow",
+      messageType: "text",
+      text: "/resume",
+      mentionedBot: false,
+      attachments: [],
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: expect.stringContaining("最近中断任务"),
+        }),
+      }),
+    );
+  });
+
+  it("renders progress updates after a task starts", async () => {
+    const store = new MemoryStore();
+    const queue = new SerialTaskQueue();
+    const reply = vi.fn(async () => ({ code: 0 }));
+    const create = vi.fn(async () => ({ code: 0 }));
+
+    const handler = createMessageHandler({
+      config: makeConfig(),
+      logger: pino({ enabled: false }),
+      store,
+      codexRunner: {
+        run: vi.fn(async () => ({ answer: "done", durationMs: 1 })),
+      },
+      queue,
+      feishuClient: {
+        im: {
+          message: {
+            reply,
+            create,
+          },
+        },
+      } as any,
+      runtimeStatus: { startedAt: Date.now(), lastErrorAt: null },
+    });
+
+    vi.spyOn(store, "loadTaskEvents").mockReturnValue([
+      {
+        taskId: "task_progress",
+        seq: 1,
+        phase: "progress",
+        message: "Launching Codex",
+        createdAt: Date.now(),
+      },
+      {
+        taskId: "task_progress",
+        seq: 2,
+        phase: "progress",
+        message: "Inspecting files",
+        createdAt: Date.now(),
+      },
+    ]);
+
+    await handler({
+      messageId: "m_progress",
+      chatId: "oc_dm",
+      chatType: "p2p",
+      senderOpenId: "ou_allow",
+      messageType: "text",
+      text: "/ask 修复启动",
+      mentionedBot: false,
+      attachments: [],
+    });
+
+    const recordedCalls = create.mock.calls as unknown as Array<[unknown]>;
+    expect(
+      recordedCalls.some((call) => {
+        const options = call[0] as { data?: { content?: string } };
+        const content = options.data?.content ?? "";
+        return content.includes("进行中");
+      }),
+    ).toBe(true);
   });
 
   it("treats plain p2p text as ask prompt", async () => {

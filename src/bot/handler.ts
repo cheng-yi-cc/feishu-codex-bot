@@ -1,15 +1,17 @@
 import type * as Lark from "@larksuiteoapi/node-sdk";
 import type { Logger } from "pino";
+import { createTaskOrchestrator } from "../runtime/orchestrator.js";
+import type { RuntimeStore } from "../runtime/types.js";
 import type { BotConfig } from "../types/config.js";
 import type { CodexRunner } from "../codex/types.js";
 import type { IncomingMessage, SessionOptions, SessionStore } from "../types/contracts.js";
-import { buildPrompt } from "../codex/prompt-builder.js";
-import { parseAssistantResponse } from "../codex/response-parser.js";
 import { downloadIncomingAttachment, type DownloadedAttachment } from "../feishu/resources.js";
 import { sendFileReply, sendImageReply, sendReplyInChunks } from "../feishu/sender.js";
 import { addTypingIndicator, removeTypingIndicator } from "../feishu/typing.js";
 import { enforceAccessPolicy } from "./access-control.js";
 import { parseCommand } from "./commands.js";
+import { resolveIntent } from "./router.js";
+import { renderProgressReply, renderResumeReply, renderStatusReply } from "./response-renderer.js";
 import { SerialTaskQueue } from "./queue.js";
 
 export type RuntimeStatus = {
@@ -20,7 +22,7 @@ export type RuntimeStatus = {
 type HandlerDeps = {
   config: BotConfig;
   logger: Logger;
-  store: SessionStore;
+  store: SessionStore & RuntimeStore;
   codexRunner: CodexRunner;
   queue: SerialTaskQueue;
   feishuClient: Lark.Client;
@@ -61,31 +63,40 @@ function isUnsupportedModelError(error: unknown): boolean {
   );
 }
 
+function createFallbackCodexRunner(
+  codexRunner: CodexRunner,
+  store: SessionStore,
+  config: BotConfig,
+  logger: Logger,
+): CodexRunner {
+  return {
+    async run(request) {
+      try {
+        return await codexRunner.run(request);
+      } catch (error) {
+        if (!request.model || !isUnsupportedModelError(error)) {
+          throw error;
+        }
+
+        logger.warn(
+          { sessionKey: request.sessionKey, model: request.model },
+          "configured model appears unsupported, fallback to default model",
+        );
+        store.setSessionModel(request.sessionKey, undefined);
+        return codexRunner.run({
+          ...request,
+          model: config.codexDefaultModel,
+        });
+      }
+    },
+  };
+}
+
 function formatSessionOptionsForUser(options: EffectiveSessionOptions): string[] {
   return [
     `- 模型: ${options.model ?? "codex 默认模型"}`,
     `- 思考等级: ${options.thinkingLevel}`,
   ];
-}
-
-function buildStatusText(
-  config: BotConfig,
-  queue: SerialTaskQueue,
-  runtimeStatus: RuntimeStatus,
-  options: EffectiveSessionOptions,
-): string {
-  const lines = [
-    "机器人状态",
-    `- 连接模式: websocket`,
-    `- 队列长度: ${queue.getPendingCount()}`,
-    `- 沙箱策略: ${config.codexSandboxMode}`,
-    `- 超时: ${config.codexTimeoutMs}ms`,
-    `- 历史轮数: ${config.codexHistoryTurns}`,
-    `- 工作目录: ${config.codexWorkdir}`,
-    ...formatSessionOptionsForUser(options),
-    `- 最近错误: ${runtimeStatus.lastErrorAt ? new Date(runtimeStatus.lastErrorAt).toISOString() : "none"}`,
-  ];
-  return lines.join("\n");
 }
 
 function summarizeAttachmentsForPrompt(attachments: DownloadedAttachment[]): string {
@@ -106,14 +117,6 @@ function buildUserPrompt(message: IncomingMessage, prompt: string): string {
     return "请结合我发送的附件给出回答。如果我没有明确问题，请先简要描述内容并询问我下一步需求。";
   }
   return "";
-}
-
-function summarizeAssistantReplyForHistory(text: string, directivesCount: number): string {
-  const lines = [text.trim()];
-  if (directivesCount > 0) {
-    lines.push(`[assistant_sent_attachments]: ${directivesCount}`);
-  }
-  return lines.filter(Boolean).join("\n");
 }
 
 async function sendTextReply(deps: HandlerDeps, message: IncomingMessage, text: string): Promise<void> {
@@ -159,6 +162,13 @@ async function sendAssistantDirectives(
 
 export function createMessageHandler(deps: HandlerDeps) {
   const { config, logger, store, codexRunner, queue, runtimeStatus } = deps;
+  const orchestrator = createTaskOrchestrator({
+    logger,
+    config,
+    sessionStore: store,
+    runtimeStore: store,
+    codexRunner: createFallbackCodexRunner(codexRunner, store, config, logger),
+  });
 
   return async function handleMessage(message: IncomingMessage): Promise<void> {
     if (store.isDuplicate(message.messageId)) {
@@ -197,19 +207,39 @@ export function createMessageHandler(deps: HandlerDeps) {
     }
 
     const sessionKey = sessionKeyForMessage(message);
+    const workspace = store.getWorkspaceState(sessionKey);
+    const intent = resolveIntent({
+      message,
+      command,
+      workspaceMode: workspace?.mode ?? "chat",
+    });
 
-    if (command.kind === "new") {
-      await queue.enqueue(async () => {
-        store.resetSession(sessionKey);
-        await sendTextReply(deps, message, "已清空当前会话上下文（含模型与思考等级设置）。");
-      });
+    if (intent.kind === "reply.status") {
+      await sendTextReply(
+        deps,
+        message,
+        renderStatusReply({
+          workspace,
+          latestTask: workspace?.lastTaskId ? store.getTask(workspace.lastTaskId) : undefined,
+          queueLength: queue.getPendingCount(),
+          sandboxMode: config.codexSandboxMode,
+          timeoutMs: config.codexTimeoutMs,
+        }),
+      );
       return;
     }
 
-    if (command.kind === "status") {
+    if (intent.kind === "workspace.resume") {
+      const latestTask = workspace?.lastTaskId ? store.getTask(workspace.lastTaskId) : undefined;
+      const events = latestTask ? store.loadTaskEvents(latestTask.id, 10) : [];
+      await sendTextReply(deps, message, renderResumeReply(latestTask, events));
+      return;
+    }
+
+    if (intent.kind === "session.reset") {
       await queue.enqueue(async () => {
-        const options = resolveEffectiveSessionOptions(config, store.getSessionOptions(sessionKey));
-        await sendTextReply(deps, message, buildStatusText(config, queue, runtimeStatus, options));
+        store.resetSession(sessionKey);
+        await sendTextReply(deps, message, "已清空当前会话上下文（含模型与思考等级设置）。");
       });
       return;
     }
@@ -260,15 +290,15 @@ export function createMessageHandler(deps: HandlerDeps) {
       return;
     }
 
-    if (command.kind !== "ask") {
+    if (intent.kind !== "task.start") {
       logger.info(
-        { messageId: message.messageId, commandKind: command.kind },
+        { messageId: message.messageId, commandKind: command.kind, intentKind: intent.kind },
         "message ignored: workspace intent not yet handled in message handler",
       );
       return;
     }
 
-    const normalizedPrompt = buildUserPrompt(message, command.prompt);
+    const normalizedPrompt = buildUserPrompt(message, intent.prompt);
     if (!normalizedPrompt) {
       logger.info({ messageId: message.messageId }, "ask command missing prompt");
       await sendTextReply(deps, message, "用法: /ask 你的问题");
@@ -282,7 +312,7 @@ export function createMessageHandler(deps: HandlerDeps) {
     });
 
     await queue.enqueue(async () => {
-      let downloadedAttachments: DownloadedAttachment[] = [];
+      const downloadedAttachments: DownloadedAttachment[] = [];
       try {
         for (const attachment of message.attachments) {
           const local = await downloadIncomingAttachment({
@@ -297,11 +327,6 @@ export function createMessageHandler(deps: HandlerDeps) {
 
         const attachmentSummary = summarizeAttachmentsForPrompt(downloadedAttachments);
         const userInput = [normalizedPrompt, attachmentSummary].filter(Boolean).join("\n\n");
-
-        store.appendUser(sessionKey, userInput);
-        const history = store.loadRecent(sessionKey, config.codexHistoryTurns);
-        const prompt = buildPrompt({ sessionKey, history });
-        const options = resolveEffectiveSessionOptions(config, store.getSessionOptions(sessionKey));
         const imagePaths = downloadedAttachments
           .filter((item) => item.type === "image")
           .map((item) => item.localPath);
@@ -310,73 +335,41 @@ export function createMessageHandler(deps: HandlerDeps) {
           {
             messageId: message.messageId,
             sessionKey,
-            model: options.model,
-            thinkingLevel: options.thinkingLevel,
+            taskKind: intent.taskKind,
             imageCount: imagePaths.length,
             attachmentCount: downloadedAttachments.length,
           },
           "starting codex execution",
         );
 
-        let retryNotice: string | null = null;
-        let result;
-        try {
-          result = await codexRunner.run({
-            sessionKey,
-            prompt,
-            workdir: config.codexWorkdir,
-            timeoutMs: config.codexTimeoutMs,
-            model: options.model,
-            reasoningEffort: options.thinkingLevel,
-            imagePaths,
-          });
-        } catch (firstError) {
-          if (!options.model || !isUnsupportedModelError(firstError)) {
-            throw firstError;
-          }
+        const result = await orchestrator.startTask({
+          sessionKey,
+          chatId: message.chatId,
+          prompt: userInput,
+          taskKind: intent.taskKind,
+          imagePaths,
+        });
 
-          logger.warn(
-            { messageId: message.messageId, sessionKey, model: options.model },
-            "configured model appears unsupported, fallback to default model",
-          );
-          store.setSessionModel(sessionKey, undefined);
-          const fallback = resolveEffectiveSessionOptions(config, store.getSessionOptions(sessionKey));
-          retryNotice = `模型 ${options.model} 当前不可用，已自动切回默认模型 ${fallback.model ?? "codex 默认模型"}。`;
-          result = await codexRunner.run({
-            sessionKey,
-            prompt,
-            workdir: config.codexWorkdir,
-            timeoutMs: config.codexTimeoutMs,
-            model: fallback.model,
-            reasoningEffort: fallback.thinkingLevel,
-            imagePaths,
-          });
+        const taskEvents = store
+          .loadTaskEvents(result.taskId, 10)
+          .filter((item) => item.phase === "progress");
+        for (const event of taskEvents.slice(-3)) {
+          await sendTextReply(deps, message, renderProgressReply(event));
         }
 
-        const parsed = parseAssistantResponse(result.answer, config.codexWorkdir);
-        const historyReply = summarizeAssistantReplyForHistory(parsed.text, parsed.directives.length);
-        store.appendAssistant(sessionKey, historyReply || result.answer);
-
-        if (retryNotice) {
-          await sendTextReply(deps, message, retryNotice);
+        if (result.text) {
+          await sendTextReply(deps, message, result.text);
         }
-        if (parsed.text) {
-          await sendTextReply(deps, message, parsed.text);
-        }
-        if (parsed.directives.length > 0) {
-          await sendAssistantDirectives(deps, message, parsed.directives);
-        }
-        if (!parsed.text && parsed.directives.length === 0) {
-          await sendTextReply(deps, message, result.answer);
+        if (result.directives.length > 0) {
+          await sendAssistantDirectives(deps, message, result.directives);
         }
 
         logger.info(
           {
             messageId: message.messageId,
             sessionKey,
-            durationMs: result.durationMs,
-            usage: result.usage,
-            directives: parsed.directives.length,
+            taskId: result.taskId,
+            directives: result.directives.length,
           },
           "codex reply dispatched",
         );
