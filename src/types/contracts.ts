@@ -1,3 +1,11 @@
+export type {
+  RuntimeStore,
+  TaskArtifactRecord,
+  TaskEventRecord,
+  TaskRecord,
+  WorkspaceState,
+} from "../runtime/types.js";
+
 export type IncomingAttachment = {
   type: "image" | "file";
   fileKey: string;
