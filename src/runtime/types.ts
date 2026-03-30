@@ -2,6 +2,18 @@ export type WorkspaceMode = "chat" | "dev";
 
 export type TaskKind = "chat" | "dev" | "control";
 
+export type UserIntent =
+  | { kind: "task.start"; taskKind: TaskKind; prompt: string }
+  | { kind: "workspace.mode"; mode?: WorkspaceMode }
+  | { kind: "workspace.resume" }
+  | { kind: "workspace.cwd"; path?: string }
+  | { kind: "workspace.command"; command: "run" | "test" | "diff" | "files" | "logs" | "branch" | "apply" | "abort"; value?: string }
+  | { kind: "reply.status" }
+  | { kind: "reply.model" }
+  | { kind: "reply.think" }
+  | { kind: "session.reset" }
+  | { kind: "noop" };
+
 export type TaskStatus =
   | "queued"
   | "running"

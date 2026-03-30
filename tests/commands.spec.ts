@@ -54,6 +54,20 @@ describe("parseCommand", () => {
     });
   });
 
+  it("parses the expanded workspace commands", () => {
+    expect(parseCommand(makeMessage("/mode dev"), "/ask")).toEqual({ kind: "mode", mode: "dev" });
+    expect(parseCommand(makeMessage("/resume"), "/ask")).toEqual({ kind: "resume" });
+    expect(parseCommand(makeMessage("/cwd D:\\My Project\\feishu-codex-bot"), "/ask")).toEqual({
+      kind: "cwd",
+      path: "D:\\My Project\\feishu-codex-bot",
+    });
+    expect(parseCommand(makeMessage("/run npm test"), "/ask")).toEqual({
+      kind: "run",
+      command: "npm test",
+    });
+    expect(parseCommand(makeMessage("/abort"), "/ask")).toEqual({ kind: "abort" });
+  });
+
   it("returns invalid for malformed model command", () => {
     expect(parseCommand(makeMessage("/model <GPT 5>"), "/ask")).toEqual({
       kind: "model",

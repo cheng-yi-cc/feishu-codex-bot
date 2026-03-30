@@ -9,7 +9,7 @@ import { downloadIncomingAttachment, type DownloadedAttachment } from "../feishu
 import { sendFileReply, sendImageReply, sendReplyInChunks } from "../feishu/sender.js";
 import { addTypingIndicator, removeTypingIndicator } from "../feishu/typing.js";
 import { enforceAccessPolicy } from "./access-control.js";
-import { parseCommand } from "./commands.js";
+import { parseCommand, type ParsedCommand } from "./commands.js";
 import { SerialTaskQueue } from "./queue.js";
 
 export type RuntimeStatus = {
@@ -260,7 +260,8 @@ export function createMessageHandler(deps: HandlerDeps) {
       return;
     }
 
-    const normalizedPrompt = buildUserPrompt(message, command.prompt);
+    const askCommand = command as Extract<ParsedCommand, { kind: "ask" }>;
+    const normalizedPrompt = buildUserPrompt(message, askCommand.prompt);
     if (!normalizedPrompt) {
       logger.info({ messageId: message.messageId }, "ask command missing prompt");
       await sendTextReply(deps, message, "用法: /ask 你的问题");
