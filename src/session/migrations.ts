@@ -10,9 +10,12 @@ export function openSessionDatabase(dbPath: string): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
-  const schemaPath = new URL("./schema.sql", import.meta.url);
-  const schemaSql = fs.readFileSync(schemaPath, "utf8");
-  db.exec(schemaSql);
+  db.exec(loadSessionSchemaSql());
 
   return db;
+}
+
+function loadSessionSchemaSql(): string {
+  const schemaPath = new URL("./schema.sql", import.meta.url);
+  return fs.readFileSync(schemaPath, "utf8");
 }

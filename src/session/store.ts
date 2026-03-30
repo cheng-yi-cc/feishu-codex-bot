@@ -1,13 +1,66 @@
 import type Database from "better-sqlite3";
 import type { Logger } from "pino";
-import type { SessionMessage, SessionOptions, SessionStore } from "../types/contracts.js";
+import type {
+  SessionMessage,
+  SessionOptions,
+  SessionStore,
+} from "../types/contracts.js";
+import type {
+  RuntimeStore,
+  TaskArtifactRecord,
+  TaskEventRecord,
+  TaskRecord,
+  TaskStatus,
+  WorkspaceState,
+  WorkspaceMode,
+} from "../runtime/types.js";
 
 type StoreOptions = {
   dedupRetentionMs: number;
   logger: Logger;
 };
 
-export class SQLiteSessionStore implements SessionStore {
+type WorkspaceStateRow = {
+  session_key: string;
+  mode: WorkspaceMode;
+  cwd: string;
+  branch: string | null;
+  last_task_id: string | null;
+  last_error_summary: string | null;
+  updated_at: number;
+};
+
+type TaskRow = {
+  id: string;
+  session_key: string;
+  kind: TaskRecord["kind"];
+  title: string;
+  input_text: string;
+  status: TaskStatus;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  summary: string | null;
+  error_summary: string | null;
+};
+
+type TaskEventRow = {
+  task_id: string;
+  seq: number;
+  phase: TaskEventRecord["phase"];
+  message: string;
+  created_at: number;
+};
+
+type TaskArtifactRow = {
+  task_id: string;
+  kind: TaskArtifactRecord["kind"];
+  label: string;
+  value: string;
+  created_at: number;
+};
+
+export class SQLiteSessionStore implements SessionStore, RuntimeStore {
   private readonly db: Database.Database;
   private readonly dedupRetentionMs: number;
   private readonly logger: Logger;
@@ -58,7 +111,9 @@ export class SQLiteSessionStore implements SessionStore {
          FROM session_options
          WHERE session_key = ?`,
       )
-      .get(sessionKey) as { model?: string | null; thinking_level?: "low" | "medium" | "high" | null } | undefined;
+      .get(sessionKey) as
+      | { model?: string | null; thinking_level?: "low" | "medium" | "high" | null }
+      | undefined;
 
     if (!row) {
       return {};
@@ -87,6 +142,210 @@ export class SQLiteSessionStore implements SessionStore {
       this.db.prepare("DELETE FROM sessions WHERE session_key = ?").run(key);
     });
     tx(sessionKey);
+  }
+
+  public saveWorkspaceState(state: WorkspaceState): void {
+    const tx = this.db.transaction((workspaceState: WorkspaceState) => {
+      this.db
+        .prepare(
+          `INSERT INTO workspace_state (
+             session_key, mode, cwd, branch, last_task_id, last_error_summary, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(session_key) DO UPDATE SET
+             mode = excluded.mode,
+             cwd = excluded.cwd,
+             branch = excluded.branch,
+             last_task_id = excluded.last_task_id,
+             last_error_summary = excluded.last_error_summary,
+             updated_at = excluded.updated_at`,
+        )
+        .run(
+          workspaceState.sessionKey,
+          workspaceState.mode,
+          workspaceState.cwd,
+          workspaceState.branch ?? null,
+          workspaceState.lastTaskId ?? null,
+          workspaceState.lastErrorSummary ?? null,
+          workspaceState.updatedAt,
+        );
+    });
+
+    tx(state);
+  }
+
+  public getWorkspaceState(sessionKey: string): WorkspaceState | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT session_key, mode, cwd, branch, last_task_id, last_error_summary, updated_at
+         FROM workspace_state
+         WHERE session_key = ?`,
+      )
+      .get(sessionKey) as WorkspaceStateRow | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      sessionKey: row.session_key,
+      mode: row.mode,
+      cwd: row.cwd,
+      branch: row.branch ?? undefined,
+      lastTaskId: row.last_task_id ?? undefined,
+      lastErrorSummary: row.last_error_summary ?? undefined,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  public createTask(task: TaskRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO tasks (
+           id, session_key, kind, title, input_text, status,
+           created_at, started_at, finished_at, summary, error_summary
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        task.id,
+        task.sessionKey,
+        task.kind,
+        task.title,
+        task.inputText,
+        task.status,
+        task.createdAt,
+        task.startedAt ?? null,
+        task.finishedAt ?? null,
+        task.summary ?? null,
+        task.errorSummary ?? null,
+      );
+  }
+
+  public getTask(taskId: string): TaskRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT id, session_key, kind, title, input_text, status, created_at,
+                started_at, finished_at, summary, error_summary
+         FROM tasks
+         WHERE id = ?`,
+      )
+      .get(taskId) as TaskRow | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    return this.mapTaskRow(row);
+  }
+
+  public listRecentTasks(sessionKey: string, limit: number): TaskRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, session_key, kind, title, input_text, status, created_at,
+                started_at, finished_at, summary, error_summary
+         FROM tasks
+         WHERE session_key = ?
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`,
+      )
+      .all(sessionKey, Math.max(1, limit)) as TaskRow[];
+
+    return rows.map((row) => this.mapTaskRow(row));
+  }
+
+  public updateTaskStatus(
+    taskId: string,
+    status: TaskStatus,
+    updates: Partial<Pick<TaskRecord, "startedAt" | "finishedAt" | "summary" | "errorSummary">> = {},
+  ): void {
+    const assignments: string[] = ["status = ?"];
+    const values: unknown[] = [status];
+
+    if (updates.startedAt !== undefined) {
+      assignments.push("started_at = ?");
+      values.push(updates.startedAt);
+    }
+    if (updates.finishedAt !== undefined) {
+      assignments.push("finished_at = ?");
+      values.push(updates.finishedAt);
+    }
+    if (updates.summary !== undefined) {
+      assignments.push("summary = ?");
+      values.push(updates.summary);
+    }
+    if (updates.errorSummary !== undefined) {
+      assignments.push("error_summary = ?");
+      values.push(updates.errorSummary);
+    }
+
+    values.push(taskId);
+    this.db
+      .prepare(`UPDATE tasks SET ${assignments.join(", ")} WHERE id = ?`)
+      .run(...values);
+  }
+
+  public appendTaskEvent(event: TaskEventRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO task_events (task_id, seq, phase, message, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(event.taskId, event.seq, event.phase, event.message, event.createdAt);
+  }
+
+  public loadTaskEvents(taskId: string, limit: number): TaskEventRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT task_id, seq, phase, message, created_at
+         FROM task_events
+         WHERE task_id = ?
+         ORDER BY seq DESC
+         LIMIT ?`,
+      )
+      .all(taskId, Math.max(1, limit)) as TaskEventRow[];
+
+    return rows.reverse().map((row) => ({
+      taskId: row.task_id,
+      seq: row.seq,
+      phase: row.phase,
+      message: row.message,
+      createdAt: row.created_at,
+    }));
+  }
+
+  public replaceTaskArtifacts(taskId: string, artifacts: TaskArtifactRecord[]): void {
+    const tx = this.db.transaction((key: string, items: TaskArtifactRecord[]) => {
+      this.db.prepare("DELETE FROM task_artifacts WHERE task_id = ?").run(key);
+
+      const insert = this.db.prepare(
+        `INSERT INTO task_artifacts (task_id, kind, label, value, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+
+      for (const artifact of items) {
+        insert.run(key, artifact.kind, artifact.label, artifact.value, artifact.createdAt);
+      }
+    });
+
+    tx(taskId, artifacts);
+  }
+
+  public listTaskArtifacts(taskId: string): TaskArtifactRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT task_id, kind, label, value, created_at
+         FROM task_artifacts
+         WHERE task_id = ?
+         ORDER BY created_at ASC, kind ASC, label ASC, value ASC`,
+      )
+      .all(taskId) as TaskArtifactRow[];
+
+    return rows.map((row) => ({
+      taskId: row.task_id,
+      kind: row.kind,
+      label: row.label,
+      value: row.value,
+      createdAt: row.created_at,
+    }));
   }
 
   private appendMessage(sessionKey: string, role: "user" | "assistant", content: string): void {
@@ -133,6 +392,22 @@ export class SQLiteSessionStore implements SessionStore {
       },
     );
     tx(sessionKey, model ?? null, thinkingLevel ?? null);
+  }
+
+  private mapTaskRow(row: TaskRow): TaskRecord {
+    return {
+      id: row.id,
+      sessionKey: row.session_key,
+      kind: row.kind,
+      title: row.title,
+      inputText: row.input_text,
+      status: row.status,
+      createdAt: row.created_at,
+      startedAt: row.started_at ?? undefined,
+      finishedAt: row.finished_at ?? undefined,
+      summary: row.summary ?? undefined,
+      errorSummary: row.error_summary ?? undefined,
+    };
   }
 
   private cleanupDedupIfNeeded(): void {

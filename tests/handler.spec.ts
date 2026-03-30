@@ -33,6 +33,36 @@ class MemoryStore implements SessionStore {
     this.options.delete(sessionKey);
   }
 
+  public saveWorkspaceState(): void {}
+
+  public getWorkspaceState(): undefined {
+    return undefined;
+  }
+
+  public createTask(): void {}
+
+  public getTask(): undefined {
+    return undefined;
+  }
+
+  public listRecentTasks(): never[] {
+    return [];
+  }
+
+  public updateTaskStatus(): void {}
+
+  public appendTaskEvent(): void {}
+
+  public loadTaskEvents(): never[] {
+    return [];
+  }
+
+  public replaceTaskArtifacts(): void {}
+
+  public listTaskArtifacts(): never[] {
+    return [];
+  }
+
   public getSessionOptions(sessionKey: string): SessionOptions {
     return { ...(this.options.get(sessionKey) ?? {}) };
   }
