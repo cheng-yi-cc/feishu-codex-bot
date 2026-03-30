@@ -17,7 +17,7 @@ describe("loadConfig", () => {
     expect(cfg.codexHistoryTurns).toBe(20);
     expect(cfg.healthPort).toBe(8787);
     expect(cfg.dbPath).toContain(path.join("data", "bot.sqlite"));
-    expect(cfg.logDir).toBe(path.join(cfg.codexWorkdir, "logs"));
+    expect(cfg.logDir).toBe(path.resolve("./logs"));
   });
 
   it("loads explicit log directory when provided", () => {
@@ -28,6 +28,23 @@ describe("loadConfig", () => {
     });
 
     expect(cfg.logDir).toBe(path.resolve("D:\\shared-logs"));
+  });
+
+  it("loads supervisor restart settings", () => {
+    expect(
+      loadConfig({
+        ...process.env,
+        FEISHU_APP_ID: "cli_x",
+        FEISHU_APP_SECRET: "secret",
+        LOG_DIR: "./logs",
+        SUPERVISOR_MAX_RESTARTS: "5",
+        SUPERVISOR_RESTART_DELAY_MS: "3000",
+      }),
+    ).toMatchObject({
+      logDir: expect.stringContaining("logs"),
+      supervisorMaxRestarts: 5,
+      supervisorRestartDelayMs: 3000,
+    });
   });
 
   it("rejects invalid trigger prefix", () => {

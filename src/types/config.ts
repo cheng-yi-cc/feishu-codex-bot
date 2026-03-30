@@ -20,4 +20,12 @@ export type BotConfig = {
   healthPort: number;
   replyChunkChars: number;
   dedupRetentionMs: number;
+  supervisorMaxRestarts?: number;
+  supervisorRestartDelayMs?: number;
+};
+
+export type ResolvedBotConfig = BotConfig & {
+  logDir: string;
+  supervisorMaxRestarts: number;
+  supervisorRestartDelayMs: number;
 };

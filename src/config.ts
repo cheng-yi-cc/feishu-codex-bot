@@ -2,7 +2,7 @@ import { config as loadDotenv } from "dotenv";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import type { BotConfig, LogLevel } from "./types/config.js";
+import type { LogLevel, ResolvedBotConfig } from "./types/config.js";
 
 loadDotenv();
 
@@ -23,9 +23,11 @@ const envSchema = z.object({
   CODEX_DEFAULT_MODEL: z.string().default(""),
   CODEX_DEFAULT_THINKING_LEVEL: z.string().default("medium"),
   DB_PATH: z.string().default("./data/bot.sqlite"),
-  LOG_DIR: z.string().default(""),
+  LOG_DIR: z.string().default("./logs"),
   LOG_LEVEL: z.string().default("info"),
   HEALTH_PORT: z.string().default("8787"),
+  SUPERVISOR_MAX_RESTARTS: z.string().default("5"),
+  SUPERVISOR_RESTART_DELAY_MS: z.string().default("3000"),
 });
 
 function parseBoolean(raw: string, key: string): boolean {
@@ -67,7 +69,7 @@ function parseAllowOpenIds(raw: string): Set<string> {
   );
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): ResolvedBotConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     throw new Error(
@@ -86,7 +88,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
   }
 
   return {
-    logDir: path.resolve(cfg.LOG_DIR || path.join(cfg.CODEX_WORKDIR, "logs")),
     feishuAppId: cfg.FEISHU_APP_ID,
     feishuAppSecret: cfg.FEISHU_APP_SECRET,
     feishuDomain: cfg.FEISHU_DOMAIN,
@@ -104,9 +105,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
       "CODEX_DEFAULT_THINKING_LEVEL",
     ),
     dbPath: path.resolve(cfg.DB_PATH),
+    logDir: path.resolve(cfg.LOG_DIR),
     logLevel: parseLogLevel(cfg.LOG_LEVEL),
     healthPort: parsePositiveInt(cfg.HEALTH_PORT, "HEALTH_PORT"),
     replyChunkChars: 3200,
     dedupRetentionMs: 7 * 24 * 60 * 60 * 1000,
+    supervisorMaxRestarts: parsePositiveInt(
+      cfg.SUPERVISOR_MAX_RESTARTS,
+      "SUPERVISOR_MAX_RESTARTS",
+    ),
+    supervisorRestartDelayMs: parsePositiveInt(
+      cfg.SUPERVISOR_RESTART_DELAY_MS,
+      "SUPERVISOR_RESTART_DELAY_MS",
+    ),
   };
 }

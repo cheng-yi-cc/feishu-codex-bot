@@ -10,78 +10,136 @@ import { SQLiteSessionStore } from "./session/store.js";
 import { SerialTaskQueue } from "./bot/queue.js";
 import { createMessageHandler, type RuntimeStatus } from "./bot/handler.js";
 import { startHealthServer } from "./health/server.js";
+import { createAppSupervisor } from "./runtime/supervisor.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  fs.mkdirSync(config.codexWorkdir, { recursive: true });
-  fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
-
   const logger = createLogger(config.logLevel);
-  const db = openSessionDatabase(config.dbPath);
-  const store = new SQLiteSessionStore(db, {
-    dedupRetentionMs: config.dedupRetentionMs,
-    logger,
-  });
+  let supervisor!: ReturnType<typeof createAppSupervisor>;
+  let shuttingDown = false;
 
-  const queue = new SerialTaskQueue();
-  const runtimeStatus: RuntimeStatus = {
-    startedAt: Date.now(),
-    lastErrorAt: null,
+  const shutdown = async (
+    reason: string,
+    exitCode: number,
+    error?: unknown,
+  ): Promise<void> => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+
+    if (error) {
+      supervisor.markRestart(error);
+      logger.error({ err: error, reason }, "bot shutting down after fatal error");
+    } else {
+      logger.info({ reason }, "shutdown signal received");
+    }
+
+    await supervisor.stop();
+    process.exit(exitCode);
   };
 
-  const codexRunner = createCodexRunner({
-    codexBin: config.codexBin,
-    sandboxMode: config.codexSandboxMode,
-    defaultWorkdir: config.codexWorkdir,
-    timeoutMs: config.codexTimeoutMs,
-  });
-
-  const feishuClient = createFeishuClient(config);
-  const botOpenId = await fetchBotOpenId(feishuClient);
-  logger.info({ botOpenId }, "bot open id resolved");
-
-  const handler = createMessageHandler({
+  supervisor = createAppSupervisor({
+    logger,
     config,
-    logger,
-    store,
-    codexRunner,
-    queue,
-    feishuClient,
-    runtimeStatus,
-  });
+    startApplication: async () => {
+      fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 
-  const monitor = startFeishuMonitor({
-    config,
-    logger,
-    botOpenId,
-    onMessage: handler,
-  });
+      const db = openSessionDatabase(config.dbPath);
+      try {
+        const store = new SQLiteSessionStore(db, {
+          dedupRetentionMs: config.dedupRetentionMs,
+          logger,
+        });
 
-  const healthServer = startHealthServer({
-    port: config.healthPort,
-    logger,
-    getSnapshot: () => ({
-      startedAt: runtimeStatus.startedAt,
-      queueLength: queue.getPendingCount(),
-      lastErrorAt: runtimeStatus.lastErrorAt,
-    }),
-  });
+        const queue = new SerialTaskQueue();
+        const runtimeStatus: RuntimeStatus = {
+          startedAt: Date.now(),
+          lastErrorAt: null,
+        };
 
-  const shutdown = async (signal: NodeJS.Signals) => {
-    logger.info({ signal }, "shutdown signal received");
-    monitor.stop();
-    await healthServer.stop();
-    db.close();
-    process.exit(0);
-  };
+        const codexRunner = createCodexRunner({
+          codexBin: config.codexBin,
+          sandboxMode: config.codexSandboxMode,
+          defaultWorkdir: config.codexWorkdir,
+          timeoutMs: config.codexTimeoutMs,
+        });
+
+        const feishuClient = createFeishuClient(config);
+        const botOpenId = await fetchBotOpenId(feishuClient);
+        logger.info({ botOpenId }, "bot open id resolved");
+
+        const handler = createMessageHandler({
+          config,
+          logger,
+          store,
+          codexRunner,
+          queue,
+          feishuClient,
+          runtimeStatus,
+        });
+
+        const monitor = startFeishuMonitor({
+          config,
+          logger,
+          botOpenId,
+          onMessage: handler,
+        });
+
+        const healthServer = startHealthServer({
+          port: config.healthPort,
+          logger,
+          getSnapshot: () => ({
+            startedAt: runtimeStatus.startedAt,
+            queueLength: queue.getPendingCount(),
+            lastErrorAt: runtimeStatus.lastErrorAt,
+            codexWorkdir: config.codexWorkdir,
+            logDir: config.logDir,
+            supervisor: {
+              ...supervisor.getSnapshot(),
+              maxRestarts: config.supervisorMaxRestarts,
+              restartDelayMs: config.supervisorRestartDelayMs,
+            },
+          }),
+        });
+
+        let stopped = false;
+        return {
+          stop: async () => {
+            if (stopped) {
+              return;
+            }
+            stopped = true;
+            monitor.stop();
+            await healthServer.stop();
+            db.close();
+          },
+        };
+      } catch (error) {
+        db.close();
+        throw error;
+      }
+    },
+  });
 
   process.on("SIGINT", () => {
-    void shutdown("SIGINT");
+    void shutdown("SIGINT", 0);
   });
   process.on("SIGTERM", () => {
-    void shutdown("SIGTERM");
+    void shutdown("SIGTERM", 0);
+  });
+  process.on("uncaughtException", (error) => {
+    void shutdown("uncaughtException", 1, error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    void shutdown(
+      "unhandledRejection",
+      1,
+      reason instanceof Error ? reason : new Error(String(reason)),
+    );
   });
 
+  await supervisor.start();
   logger.info("feishu-codex-bot started");
 }
 

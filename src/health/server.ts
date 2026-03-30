@@ -1,10 +1,18 @@
 import http from "node:http";
 import type { Logger } from "pino";
 
-type HealthSnapshot = {
+export type HealthSnapshot = {
   startedAt: number;
   queueLength: number;
   lastErrorAt: number | null;
+  codexWorkdir: string;
+  logDir: string;
+  supervisor: {
+    restartCount: number;
+    lastErrorAt: number | null;
+    maxRestarts: number;
+    restartDelayMs: number;
+  };
 };
 
 type HealthServerOptions = {
@@ -38,6 +46,16 @@ export function startHealthServer(options: HealthServerOptions): HealthServerHan
         uptimeMs: Date.now() - snapshot.startedAt,
         queueLength: snapshot.queueLength,
         lastErrorAt: snapshot.lastErrorAt ? new Date(snapshot.lastErrorAt).toISOString() : null,
+        codexWorkdir: snapshot.codexWorkdir,
+        logDir: snapshot.logDir,
+        supervisor: {
+          restartCount: snapshot.supervisor.restartCount,
+          lastErrorAt: snapshot.supervisor.lastErrorAt
+            ? new Date(snapshot.supervisor.lastErrorAt).toISOString()
+            : null,
+          maxRestarts: snapshot.supervisor.maxRestarts,
+          restartDelayMs: snapshot.supervisor.restartDelayMs,
+        },
       }),
     );
   });

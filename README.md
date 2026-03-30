@@ -16,7 +16,8 @@ Standalone TypeScript service that receives Feishu messages via WebSocket and ro
 - Typing reaction (`Typing`) while Codex is running
 - Receive image/file messages, download to local workspace, and pass to Codex
 - Support Codex sending image/file back via response directives
-- Health endpoint: `GET /healthz`
+- Supervisor preflight for `CODEX_BIN`, log directory, and workspace readiness
+- Health endpoint: `GET /healthz` with queue and supervisor snapshot metadata
 
 ## Quick Start
 
@@ -61,8 +62,11 @@ Optional defaults:
 - `CODEX_DEFAULT_MODEL=gpt-5`
 - `CODEX_DEFAULT_THINKING_LEVEL=medium` (`low|medium|high`)
 - `DB_PATH=./data/bot.sqlite`
+- `LOG_DIR=./logs`
 - `LOG_LEVEL=info`
 - `HEALTH_PORT=8787`
+- `SUPERVISOR_MAX_RESTARTS=5`
+- `SUPERVISOR_RESTART_DELAY_MS=3000`
 
 ## Build and Run
 
@@ -81,6 +85,18 @@ pm2 start ecosystem.config.cjs
 pm2 logs feishu-codex-bot
 pm2 restart feishu-codex-bot
 ```
+
+## Windows Startup
+
+Production startup uses `start-bot.ps1`, which builds `dist/index.js` on demand and writes logs to `logs/app.log` and `logs/app.err.log`.
+
+Register the startup task with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-startup-task.ps1
+```
+
+After registration, verify `GET /healthz` returns the expected `codexWorkdir`, `logDir`, and `supervisor.restartCount`.
 
 ## Commands in Feishu
 
