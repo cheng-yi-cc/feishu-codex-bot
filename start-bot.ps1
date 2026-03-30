@@ -1,4 +1,7 @@
 $ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+  $PSNativeCommandUseErrorActionPreference = $false
+}
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $projectRoot
@@ -27,6 +30,24 @@ function Resolve-CommandPath {
   }
 
   return $command.Source
+}
+
+function Invoke-LoggedProcess {
+  param(
+    [string]$FilePath,
+    [string[]]$ArgumentList
+  )
+
+  $process = Start-Process `
+    -FilePath $FilePath `
+    -ArgumentList $ArgumentList `
+    -WorkingDirectory $projectRoot `
+    -RedirectStandardOutput $stdout `
+    -RedirectStandardError $stderr `
+    -Wait `
+    -PassThru
+
+  return $process.ExitCode
 }
 
 function Get-BotProcesses {
@@ -59,7 +80,7 @@ function Resolve-CodexBin {
   return $null
 }
 
-$mutex = New-Object System.Threading.Mutex($false, "Global\\FeishuCodexWorkspaceBotStarter")
+$mutex = New-Object System.Threading.Mutex($false, "Global\FeishuCodexWorkspaceBotStarter")
 $lockTaken = $false
 
 try {
@@ -86,16 +107,15 @@ try {
 
   if (!(Test-Path $entrypoint)) {
     Write-StartLog "dist/index.js missing; running build"
-    & $npmCmd run build 1>> $stdout 2>> $stderr
-    if ($LASTEXITCODE -ne 0) {
-      Write-StartLog "build failed exitCode=$LASTEXITCODE"
-      exit $LASTEXITCODE
+    $buildExitCode = Invoke-LoggedProcess -FilePath $npmCmd -ArgumentList @("run", "build")
+    if ($buildExitCode -ne 0) {
+      Write-StartLog "build failed exitCode=$buildExitCode"
+      exit $buildExitCode
     }
   }
 
   Write-StartLog "starting bot via $nodeCmd"
-  & $nodeCmd $entrypoint 1>> $stdout 2>> $stderr
-  $exitCode = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 1 }
+  $exitCode = Invoke-LoggedProcess -FilePath $nodeCmd -ArgumentList @($entrypoint)
   Write-StartLog "bot exited with code=$exitCode"
   exit $exitCode
 } finally {
