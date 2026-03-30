@@ -28,6 +28,13 @@ export type SessionMessage = {
   content: string;
 };
 
+export type CodexStreamEvent =
+  | { type: "thread.started"; threadId: string }
+  | { type: "tool.started"; label: string; message: string }
+  | { type: "tool.completed"; label: string; message: string }
+  | { type: "agent.message"; message: string }
+  | { type: "turn.completed"; inputTokens?: number; outputTokens?: number };
+
 export type CodexRunRequest = {
   sessionKey: string;
   prompt: string;
@@ -36,6 +43,8 @@ export type CodexRunRequest = {
   model?: string;
   reasoningEffort?: "low" | "medium" | "high";
   imagePaths?: string[];
+  onEvent?: (event: CodexStreamEvent) => void;
+  abortSignal?: AbortSignal;
 };
 
 export type CodexRunResult = {

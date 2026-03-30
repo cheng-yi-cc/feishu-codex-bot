@@ -1,5 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { CodexJsonState, CodexRunner, CodexRunnerOptions } from "./types.js";
+import type {
+  CodexJsonItem,
+  CodexJsonRecord,
+  CodexJsonState,
+  CodexRunner,
+  CodexRunnerOptions,
+  CodexStreamListener,
+} from "./types.js";
 import type { CodexRunRequest, CodexRunResult } from "../types/contracts.js";
 
 type SpawnFactory = (
@@ -23,7 +30,19 @@ function toUsage(eventUsage: unknown): CodexJsonState["usage"] | undefined {
   };
 }
 
-export function applyCodexJsonLine(line: string, state: CodexJsonState): void {
+function getToolLabel(item: CodexJsonItem | undefined): string {
+  const label = item?.description ?? item?.name;
+  if (typeof label === "string" && label.trim().length > 0) {
+    return label;
+  }
+  return "tool";
+}
+
+export function applyCodexJsonLine(
+  line: string,
+  state: CodexJsonState,
+  onEvent?: CodexStreamListener,
+): void {
   if (!line.trim()) return;
 
   let event: unknown;
@@ -35,27 +54,41 @@ export function applyCodexJsonLine(line: string, state: CodexJsonState): void {
 
   if (!event || typeof event !== "object") return;
 
-  const record = event as {
-    type?: string;
-    thread_id?: string;
-    item?: { type?: string; text?: string };
-    usage?: unknown;
-  };
+  const record = event as CodexJsonRecord;
 
   if (record.type === "thread.started" && typeof record.thread_id === "string") {
     state.threadId = record.thread_id;
+    onEvent?.({ type: "thread.started", threadId: record.thread_id });
+    return;
+  }
+
+  if (record.item?.type === "tool_call" && record.type === "item.started") {
+    const label = getToolLabel(record.item);
+    onEvent?.({ type: "tool.started", label, message: label });
+    return;
+  }
+
+  if (record.item?.type === "tool_call" && record.type === "item.completed") {
+    const label = getToolLabel(record.item);
+    onEvent?.({ type: "tool.completed", label, message: label });
     return;
   }
 
   if (record.type === "item.completed" && record.item?.type === "agent_message") {
     if (typeof record.item.text === "string" && record.item.text.trim().length > 0) {
       state.answer = record.item.text;
+      onEvent?.({ type: "agent.message", message: record.item.text });
     }
     return;
   }
 
   if (record.type === "turn.completed") {
     state.usage = toUsage(record.usage);
+    onEvent?.({
+      type: "turn.completed",
+      inputTokens: state.usage?.inputTokens,
+      outputTokens: state.usage?.outputTokens,
+    });
   }
 }
 
@@ -104,20 +137,50 @@ export function createCodexRunner(
       await new Promise<void>((resolve, reject) => {
         let stdoutBuffer = "";
         let finished = false;
+        let abortHandler: (() => void) | undefined;
+
+        const cleanup = () => {
+          if (abortHandler && request.abortSignal) {
+            request.abortSignal.removeEventListener("abort", abortHandler);
+          }
+        };
 
         const timeout = setTimeout(() => {
           if (!finished) {
+            finished = true;
+            cleanup();
             child.kill();
             reject(new Error(`codex execution timed out after ${timeoutMs}ms`));
           }
         }, timeoutMs);
+
+        if (request.abortSignal) {
+          abortHandler = () => {
+            if (finished) {
+              return;
+            }
+
+            finished = true;
+            clearTimeout(timeout);
+            cleanup();
+            child.kill();
+            reject(new Error("codex execution aborted"));
+          };
+
+          if (request.abortSignal.aborted) {
+            abortHandler();
+            return;
+          }
+
+          request.abortSignal.addEventListener("abort", abortHandler, { once: true });
+        }
 
         child.stdout.on("data", (chunk: Buffer) => {
           stdoutBuffer += chunk.toString("utf8");
           let idx = stdoutBuffer.indexOf("\n");
           while (idx >= 0) {
             const line = stdoutBuffer.slice(0, idx);
-            applyCodexJsonLine(line, state);
+            applyCodexJsonLine(line, state, request.onEvent);
             stdoutBuffer = stdoutBuffer.slice(idx + 1);
             idx = stdoutBuffer.indexOf("\n");
           }
@@ -131,14 +194,16 @@ export function createCodexRunner(
 
         child.on("error", (err) => {
           clearTimeout(timeout);
+          cleanup();
           reject(err);
         });
 
         child.on("close", (code) => {
           clearTimeout(timeout);
+          cleanup();
           finished = true;
           if (stdoutBuffer.trim()) {
-            applyCodexJsonLine(stdoutBuffer, state);
+            applyCodexJsonLine(stdoutBuffer, state, request.onEvent);
           }
 
           if (code !== 0) {

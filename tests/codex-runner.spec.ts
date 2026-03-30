@@ -91,6 +91,45 @@ describe("createCodexRunner", () => {
     );
   });
 
+  it("emits tool progress events from json stream", async () => {
+    const child = createFakeChild();
+    const runner = createCodexRunner(
+      {
+        codexBin: "codex",
+        sandboxMode: "danger-full-access",
+        defaultWorkdir: "C:\\tmp",
+        timeoutMs: 1000,
+      },
+      (() => child as any) as any,
+    );
+
+    const emitted: string[] = [];
+
+    setTimeout(() => {
+      child.stdout.write(
+        '{"type":"item.started","item":{"type":"tool_call","description":"Read src/index.ts"}}\n',
+      );
+      child.stdout.write(
+        '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n',
+      );
+      child.emit("close", 0);
+    }, 10);
+
+    await runner.run({
+      sessionKey: "s1",
+      prompt: "hello",
+      workdir: "C:\\tmp",
+      timeoutMs: 1000,
+      onEvent: (event) => {
+        if (event.type === "tool.started") {
+          emitted.push(`${event.type}:${event.label}`);
+        }
+      },
+    });
+
+    expect(emitted).toContain("tool.started:Read src/index.ts");
+  });
+
   it("times out when child does not exit", async () => {
     const child = createFakeChild();
     child.kill = vi.fn(() => true);

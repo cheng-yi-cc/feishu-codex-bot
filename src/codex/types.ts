@@ -1,4 +1,4 @@
-import type { CodexRunRequest, CodexRunResult, SessionMessage } from "../types/contracts.js";
+import type { CodexRunRequest, CodexRunResult, CodexStreamEvent, SessionMessage } from "../types/contracts.js";
 
 export type CodexPromptParams = {
   sessionKey: string;
@@ -19,6 +19,22 @@ export type CodexJsonState = {
   threadId?: string;
   usage?: CodexUsage;
 };
+
+export type CodexJsonItem = {
+  type?: string;
+  text?: string;
+  description?: string;
+  name?: string;
+};
+
+export type CodexJsonRecord = {
+  type?: string;
+  thread_id?: string;
+  item?: CodexJsonItem;
+  usage?: unknown;
+};
+
+export type CodexStreamListener = (event: CodexStreamEvent) => void;
 
 export type CodexRunnerOptions = {
   codexBin: string;
