@@ -1,4 +1,8 @@
 ﻿import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach } from "vitest";
 import pino from "pino";
 import { createMessageHandler } from "../src/bot/handler.js";
 import { SerialTaskQueue } from "../src/bot/queue.js";
@@ -11,6 +15,15 @@ import type {
 } from "../src/runtime/types.js";
 import type { BotConfig } from "../src/types/config.js";
 import type { SessionMessage, SessionOptions, SessionStore } from "../src/types/contracts.js";
+
+const tempPaths: string[] = [];
+
+afterEach(() => {
+  for (const tempPath of tempPaths) {
+    fs.rmSync(tempPath, { recursive: true, force: true });
+  }
+  tempPaths.length = 0;
+});
 
 class MemoryStore implements SessionStore, RuntimeStore {
   public readonly dedup = new Set<string>();
@@ -142,11 +155,21 @@ function makeConfig(): BotConfig {
     codexDefaultModel: "gpt-5",
     codexDefaultThinkingLevel: "medium",
     dbPath: "./data/test.sqlite",
+    logDir: path.join("C:\\tmp", "logs"),
     logLevel: "info",
     healthPort: 8787,
     replyChunkChars: 3200,
     dedupRetentionMs: 1000,
   };
+}
+
+function collectSentText(create: ReturnType<typeof vi.fn>): string {
+  return create.mock.calls
+    .map((call) => {
+      const options = call[0] as { data?: { content?: string } } | undefined;
+      return JSON.parse(options?.data?.content ?? "{}").text ?? "";
+    })
+    .join("");
 }
 
 describe("createMessageHandler", () => {
@@ -687,6 +710,128 @@ describe("createMessageHandler", () => {
         }),
       }),
     );
+  });
+
+  it("runs workspace commands inside the stored active workspace cwd and bounds the output", async () => {
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-handler-workspace-"));
+    const activeCwd = path.join(workspaceRoot, "packages", "bot");
+    fs.mkdirSync(activeCwd, { recursive: true });
+    tempPaths.push(workspaceRoot);
+
+    const store = new MemoryStore();
+    store.saveWorkspaceState({
+      sessionKey: "dm:ou_allow",
+      mode: "dev",
+      cwd: activeCwd,
+      branch: "main",
+      lastTaskId: undefined,
+      lastErrorSummary: undefined,
+      updatedAt: Date.now(),
+    });
+
+    const queue = new SerialTaskQueue();
+    const create = vi.fn(async () => ({ code: 0 }));
+
+    const handler = createMessageHandler({
+      config: {
+        ...makeConfig(),
+        codexWorkdir: workspaceRoot,
+        codexTimeoutMs: 5000,
+      },
+      logger: pino({ enabled: false }),
+      store,
+      codexRunner: {
+        run: vi.fn(async () => ({ answer: "unused", durationMs: 1 })),
+      },
+      queue,
+      feishuClient: {
+        im: {
+          message: {
+            reply: vi.fn(async () => ({ code: 0 })),
+            create,
+          },
+        },
+      } as any,
+      runtimeStatus: { startedAt: Date.now(), lastErrorAt: null },
+    });
+
+    await handler({
+      messageId: "m_workspace_bound_output",
+      chatId: "oc_dm",
+      chatType: "p2p",
+      senderOpenId: "ou_allow",
+      messageType: "text",
+      text:
+        '/run $payload = "HEAD|" + ("A" * 4500) + "|" + ((Get-Location).Path) + "|TAIL"; Write-Output $payload',
+      mentionedBot: false,
+      attachments: [],
+    });
+
+    const sentText = collectSentText(create);
+    expect(sentText).toContain(`${activeCwd}|`);
+    expect(sentText).toContain("|TAIL");
+    expect(sentText).not.toContain("HEAD|");
+    expect(sentText.length).toBeLessThanOrEqual(4000);
+  });
+
+  it("reads /logs from the configured log directory instead of the workspace cwd", async () => {
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-handler-logs-workspace-"));
+    const activeCwd = path.join(workspaceRoot, "nested", "workspace");
+    const logRoot = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-handler-logs-dir-"));
+    fs.mkdirSync(activeCwd, { recursive: true });
+    fs.writeFileSync(path.join(logRoot, "app.log"), "log-from-config-dir\n");
+    tempPaths.push(workspaceRoot, logRoot);
+
+    const store = new MemoryStore();
+    store.saveWorkspaceState({
+      sessionKey: "dm:ou_allow",
+      mode: "dev",
+      cwd: activeCwd,
+      branch: "main",
+      lastTaskId: undefined,
+      lastErrorSummary: undefined,
+      updatedAt: Date.now(),
+    });
+
+    const queue = new SerialTaskQueue();
+    const create = vi.fn(async () => ({ code: 0 }));
+
+    const handler = createMessageHandler({
+      config: {
+        ...makeConfig(),
+        codexWorkdir: workspaceRoot,
+        codexTimeoutMs: 5000,
+        logDir: logRoot,
+      },
+      logger: pino({ enabled: false }),
+      store,
+      codexRunner: {
+        run: vi.fn(async () => ({ answer: "unused", durationMs: 1 })),
+      },
+      queue,
+      feishuClient: {
+        im: {
+          message: {
+            reply: vi.fn(async () => ({ code: 0 })),
+            create,
+          },
+        },
+      } as any,
+      runtimeStatus: { startedAt: Date.now(), lastErrorAt: null },
+    });
+
+    await handler({
+      messageId: "m_workspace_logs",
+      chatId: "oc_dm",
+      chatType: "p2p",
+      senderOpenId: "ou_allow",
+      messageType: "text",
+      text: "/logs",
+      mentionedBot: false,
+      attachments: [],
+    });
+
+    expect(collectSentText(create)).toContain("log-from-config-dir");
   });
 
   it("treats plain p2p text as ask prompt", async () => {

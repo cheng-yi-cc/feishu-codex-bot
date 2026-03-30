@@ -17,6 +17,17 @@ describe("loadConfig", () => {
     expect(cfg.codexHistoryTurns).toBe(20);
     expect(cfg.healthPort).toBe(8787);
     expect(cfg.dbPath).toContain(path.join("data", "bot.sqlite"));
+    expect(cfg.logDir).toBe(path.join(cfg.codexWorkdir, "logs"));
+  });
+
+  it("loads explicit log directory when provided", () => {
+    const cfg = loadConfig({
+      ...baseEnv,
+      CODEX_WORKDIR: "D:\\workspace",
+      LOG_DIR: "D:\\shared-logs",
+    });
+
+    expect(cfg.logDir).toBe(path.resolve("D:\\shared-logs"));
   });
 
   it("rejects invalid trigger prefix", () => {

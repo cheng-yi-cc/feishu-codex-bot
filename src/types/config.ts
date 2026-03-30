@@ -15,6 +15,7 @@ export type BotConfig = {
   codexDefaultModel?: string;
   codexDefaultThinkingLevel: "low" | "medium" | "high";
   dbPath: string;
+  logDir?: string;
   logLevel: LogLevel;
   healthPort: number;
   replyChunkChars: number;

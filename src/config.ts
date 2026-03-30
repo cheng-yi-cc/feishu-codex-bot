@@ -23,6 +23,7 @@ const envSchema = z.object({
   CODEX_DEFAULT_MODEL: z.string().default(""),
   CODEX_DEFAULT_THINKING_LEVEL: z.string().default("medium"),
   DB_PATH: z.string().default("./data/bot.sqlite"),
+  LOG_DIR: z.string().default(""),
   LOG_LEVEL: z.string().default("info"),
   HEALTH_PORT: z.string().default("8787"),
 });
@@ -85,6 +86,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
   }
 
   return {
+    logDir: path.resolve(cfg.LOG_DIR || path.join(cfg.CODEX_WORKDIR, "logs")),
     feishuAppId: cfg.FEISHU_APP_ID,
     feishuAppSecret: cfg.FEISHU_APP_SECRET,
     feishuDomain: cfg.FEISHU_DOMAIN,

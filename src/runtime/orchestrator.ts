@@ -131,8 +131,8 @@ function escapePowershellLiteral(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-function buildLogsCommand(workdir: string): string {
-  const logPath = path.join(workdir, "logs", "app.log");
+function buildLogsCommand(logDir: string): string {
+  const logPath = path.join(logDir, "app.log");
   const escapedLogPath = escapePowershellLiteral(logPath);
   return [
     `$logPath = '${escapedLogPath}'`,
@@ -161,6 +161,7 @@ function buildWorkspaceCommandText(
   command: WorkspaceCommandName,
   value: string | undefined,
   workdir: string,
+  config: BotConfig,
 ): string | undefined {
   if (command === "run") {
     return value?.trim();
@@ -175,7 +176,7 @@ function buildWorkspaceCommandText(
     return "git diff --name-only --no-ext-diff";
   }
   if (command === "logs") {
-    return buildLogsCommand(workdir);
+    return buildLogsCommand(config.logDir ?? path.join(config.codexWorkdir, "logs"));
   }
   if (command === "branch") {
     return buildBranchCommand(value?.trim());
@@ -346,7 +347,7 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
         };
       }
 
-      const commandText = buildWorkspaceCommandText(params.command, params.value, cwd);
+      const commandText = buildWorkspaceCommandText(params.command, params.value, cwd, config);
       if (!commandText) {
         return {
           text: "请提供要执行的命令。",
