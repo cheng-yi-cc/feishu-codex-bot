@@ -34,28 +34,53 @@ describe("parseCommand", () => {
   it("parses model and think commands", () => {
     expect(parseCommand(makeMessage("/model gpt-5"), "/ask")).toEqual({
       kind: "model",
+      action: "set",
       model: "gpt-5",
     });
     expect(parseCommand(makeMessage("/model <gpt-5>"), "/ask")).toEqual({
       kind: "model",
+      action: "set",
       model: "gpt-5",
     });
-    expect(parseCommand(makeMessage("/model 《gpt-5》"), "/ask")).toEqual({
+    expect(parseCommand(makeMessage("/model default"), "/ask")).toEqual({
       kind: "model",
-      model: "gpt-5",
+      action: "reset",
+      reset: true,
     });
     expect(parseCommand(makeMessage("/think high"), "/ask")).toEqual({
       kind: "think",
+      action: "set",
       level: "high",
     });
     expect(parseCommand(makeMessage("/think <high>"), "/ask")).toEqual({
       kind: "think",
+      action: "set",
       level: "high",
+    });
+    expect(parseCommand(makeMessage("/think default"), "/ask")).toEqual({
+      kind: "think",
+      action: "reset",
+      reset: true,
     });
   });
 
   it("parses the expanded workspace commands", () => {
-    expect(parseCommand(makeMessage("/mode dev"), "/ask")).toEqual({ kind: "mode", mode: "dev" });
+    expect(parseCommand(makeMessage("/mode"), "/ask")).toEqual({ kind: "mode", action: "show" });
+    expect(parseCommand(makeMessage("/mode default"), "/ask")).toEqual({
+      kind: "mode",
+      action: "reset",
+      reset: true,
+    });
+    expect(parseCommand(makeMessage("/mode dev"), "/ask")).toEqual({
+      kind: "mode",
+      action: "set",
+      mode: "dev",
+    });
+    expect(parseCommand(makeMessage("/mode purple"), "/ask")).toEqual({
+      kind: "mode",
+      action: "invalid",
+      invalidArg: "purple",
+    });
     expect(parseCommand(makeMessage("/resume"), "/ask")).toEqual({ kind: "resume" });
     expect(parseCommand(makeMessage("/cwd D:\\My Project\\feishu-codex-bot"), "/ask")).toEqual({
       kind: "cwd",
@@ -65,14 +90,45 @@ describe("parseCommand", () => {
       kind: "run",
       command: "npm test",
     });
-    expect(parseCommand(makeMessage("/abort"), "/ask")).toEqual({ kind: "abort" });
-  });
-
-  it("returns invalid for malformed model command", () => {
+    expect(parseCommand(makeMessage("/model"), "/ask")).toEqual({
+      kind: "model",
+      action: "show",
+    });
+    expect(parseCommand(makeMessage("/model default"), "/ask")).toEqual({
+      kind: "model",
+      action: "reset",
+      reset: true,
+    });
+    expect(parseCommand(makeMessage("/model gpt-5"), "/ask")).toEqual({
+      kind: "model",
+      action: "set",
+      model: "gpt-5",
+    });
     expect(parseCommand(makeMessage("/model <GPT 5>"), "/ask")).toEqual({
       kind: "model",
+      action: "invalid",
       invalidArg: "<GPT 5>",
     });
+    expect(parseCommand(makeMessage("/think"), "/ask")).toEqual({
+      kind: "think",
+      action: "show",
+    });
+    expect(parseCommand(makeMessage("/think default"), "/ask")).toEqual({
+      kind: "think",
+      action: "reset",
+      reset: true,
+    });
+    expect(parseCommand(makeMessage("/think high"), "/ask")).toEqual({
+      kind: "think",
+      action: "set",
+      level: "high",
+    });
+    expect(parseCommand(makeMessage("/think <ultra>"), "/ask")).toEqual({
+      kind: "think",
+      action: "invalid",
+      invalidArg: "<ultra>",
+    });
+    expect(parseCommand(makeMessage("/abort"), "/ask")).toEqual({ kind: "abort" });
   });
 
   it("treats attachment-only message as ask", () => {

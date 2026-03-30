@@ -6,7 +6,7 @@ export type ParsedCommand =
   | { kind: "new" }
   | { kind: "status" }
   | { kind: "resume" }
-  | { kind: "mode"; mode?: WorkspaceMode; reset?: boolean; invalidArg?: string }
+  | { kind: "mode"; action: "show" | "reset" | "set" | "invalid"; mode?: WorkspaceMode; reset?: boolean; invalidArg?: string }
   | { kind: "cwd"; path?: string }
   | { kind: "run"; command?: string }
   | { kind: "test"; target?: string }
@@ -16,8 +16,8 @@ export type ParsedCommand =
   | { kind: "branch"; name?: string }
   | { kind: "apply" }
   | { kind: "abort" }
-  | { kind: "model"; model?: string; reset?: boolean; invalidArg?: string }
-  | { kind: "think"; level?: "low" | "medium" | "high"; reset?: boolean; invalidArg?: string }
+  | { kind: "model"; action: "show" | "reset" | "set" | "invalid"; model?: string; reset?: boolean; invalidArg?: string }
+  | { kind: "think"; action: "show" | "reset" | "set" | "invalid"; level?: "low" | "medium" | "high"; reset?: boolean; invalidArg?: string }
   | { kind: "none" };
 
 function unwrapAngleArg(raw: string): string {
@@ -37,18 +37,20 @@ function isLikelyModelName(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
 }
 
-function parseModeArg(raw: string): Pick<Extract<ParsedCommand, { kind: "mode" }>, "mode" | "reset" | "invalidArg"> {
+function parseModeArg(
+  raw: string,
+): Pick<Extract<ParsedCommand, { kind: "mode" }>, "action" | "mode" | "reset" | "invalidArg"> {
   const value = raw.trim().toLowerCase();
   if (!value) {
-    return {};
+    return { action: "show" };
   }
   if (value === "default") {
-    return { reset: true };
+    return { action: "reset", reset: true };
   }
   if (value === "chat" || value === "dev") {
-    return { mode: value };
+    return { action: "set", mode: value };
   }
-  return { invalidArg: raw };
+  return { action: "invalid", invalidArg: raw.trim() };
 }
 
 export function parseCommand(message: IncomingMessage, prefix: "/ask"): ParsedCommand {
@@ -70,7 +72,7 @@ export function parseCommand(message: IncomingMessage, prefix: "/ask"): ParsedCo
   }
 
   if (text === "/mode") {
-    return { kind: "mode" };
+    return { kind: "mode", action: "show" };
   }
   if (text.startsWith("/mode ")) {
     const rawValue = text.slice("/mode ".length).trim();
@@ -131,39 +133,39 @@ export function parseCommand(message: IncomingMessage, prefix: "/ask"): ParsedCo
   }
 
   if (text === "/model") {
-    return { kind: "model" };
+    return { kind: "model", action: "show" };
   }
   if (text.startsWith("/model ")) {
     const rawValue = text.slice("/model ".length).trim();
     const value = normalizeModelArg(rawValue);
     if (!value) {
-      return { kind: "model" };
+      return { kind: "model", action: "show" };
     }
     if (value.toLowerCase() === "default") {
-      return { kind: "model", reset: true };
+      return { kind: "model", action: "reset", reset: true };
     }
     if (!isLikelyModelName(value)) {
-      return { kind: "model", invalidArg: rawValue };
+      return { kind: "model", action: "invalid", invalidArg: rawValue };
     }
-    return { kind: "model", model: value };
+    return { kind: "model", action: "set", model: value };
   }
 
   if (text === "/think") {
-    return { kind: "think" };
+    return { kind: "think", action: "show" };
   }
   if (text.startsWith("/think ")) {
     const rawValue = text.slice("/think ".length).trim();
     const value = unwrapAngleArg(rawValue).toLowerCase();
     if (!value) {
-      return { kind: "think" };
+      return { kind: "think", action: "show" };
     }
     if (value === "default") {
-      return { kind: "think", reset: true };
+      return { kind: "think", action: "reset", reset: true };
     }
     if (value === "low" || value === "medium" || value === "high") {
-      return { kind: "think", level: value };
+      return { kind: "think", action: "set", level: value };
     }
-    return { kind: "think", invalidArg: rawValue };
+    return { kind: "think", action: "invalid", invalidArg: rawValue };
   }
 
   if (text === prefix) {
