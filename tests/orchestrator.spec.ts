@@ -493,4 +493,91 @@ describe("createTaskOrchestrator", () => {
       }),
     );
   });
+
+  it("persists aborted runs as interrupted and keeps workspace error state clear", async () => {
+    const existingState = {
+      sessionKey: "dm:ou_allow",
+      mode: "dev" as const,
+      cwd: "D:\\repo\\custom",
+      branch: "feature/runtime",
+      lastTaskId: "old-task",
+      lastErrorSummary: "older failure",
+      updatedAt: 100,
+    };
+    const sessionStore: Pick<
+      SessionStore,
+      "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
+    > = {
+      appendUser: vi.fn(),
+      appendAssistant: vi.fn(),
+      loadRecent: vi.fn(
+        (): SessionMessage[] => [
+          { role: "user", content: "abort me" },
+        ],
+      ),
+      getSessionOptions: vi.fn((): SessionOptions => ({})),
+    };
+    const runtimeStore: Pick<
+      RuntimeStore,
+      | "saveWorkspaceState"
+      | "getWorkspaceState"
+      | "createTask"
+      | "updateTaskStatus"
+      | "appendTaskEvent"
+      | "replaceTaskArtifacts"
+    > = {
+      saveWorkspaceState: vi.fn(),
+      getWorkspaceState: vi.fn(() => existingState),
+      createTask: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      appendTaskEvent: vi.fn(),
+      replaceTaskArtifacts: vi.fn(),
+    };
+    const codexRunner: CodexRunner = {
+      run: vi.fn(async (request: CodexRunRequest) => {
+        request.onEvent?.({
+          type: "tool.started",
+          label: "Long running task",
+          message: "Long running task",
+        });
+        throw new Error("codex execution aborted");
+      }),
+    };
+
+    const orchestrator = createTaskOrchestrator({
+      logger: pino({ enabled: false }),
+      config: makeConfig(),
+      sessionStore,
+      runtimeStore,
+      codexRunner,
+    });
+
+    await expect(
+      orchestrator.startTask({
+        sessionKey: "dm:ou_allow",
+        chatId: "oc_1",
+        prompt: "abort me",
+        taskKind: "chat",
+      }),
+    ).rejects.toThrow("codex execution aborted");
+
+    expect(runtimeStore.updateTaskStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "interrupted",
+      expect.objectContaining({
+        finishedAt: expect.any(Number),
+      }),
+    );
+    expect(runtimeStore.saveWorkspaceState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionKey: existingState.sessionKey,
+        mode: existingState.mode,
+        cwd: existingState.cwd,
+        branch: existingState.branch,
+        lastTaskId: expect.any(String),
+        lastErrorSummary: undefined,
+        updatedAt: expect.any(Number),
+      }),
+    );
+  });
 });

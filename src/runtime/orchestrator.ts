@@ -93,6 +93,16 @@ function isErrorWithMessage(error: unknown): error is Error {
   return error instanceof Error;
 }
 
+function isInterruptedError(error: unknown, signal: AbortSignal): boolean {
+  if (signal.aborted) {
+    return true;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.message.toLowerCase().includes("aborted");
+}
+
 function buildAssistantHistoryEntry(text: string, directives: OutgoingDirective[]): string | undefined {
   if (text) {
     return text;
@@ -192,12 +202,16 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
       } catch (error) {
         const finishedAt = Date.now();
         const message = isErrorWithMessage(error) ? error.message : "unknown task error";
+        const interrupted = isInterruptedError(error, controller.signal);
+        const terminalStatus = interrupted ? "interrupted" : "failed";
+        const taskErrorSummary = interrupted ? undefined : message;
+        const workspaceErrorSummary = interrupted ? undefined : message;
 
         if (taskCreated) {
           try {
-            runtimeStore.updateTaskStatus(taskId, "failed", {
+            runtimeStore.updateTaskStatus(taskId, terminalStatus, {
               finishedAt,
-              errorSummary: message,
+              errorSummary: taskErrorSummary,
             });
           } catch (cleanupError) {
             logger.error({ err: cleanupError, taskId }, "failed to update task status during cleanup");
@@ -218,13 +232,17 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
           try {
             runtimeStore.saveWorkspaceState({
               ...resolveWorkspaceState(existingState, sessionKey, taskKind, taskId, workdir, finishedAt),
-              lastErrorSummary: message,
+              lastErrorSummary: workspaceErrorSummary,
             });
           } catch (cleanupError) {
             logger.error({ err: cleanupError, taskId }, "failed to persist workspace error summary during cleanup");
           }
         }
-        logger.error({ err: error, taskId, sessionKey, chatId }, "task failed");
+        if (interrupted) {
+          logger.info({ err: error, taskId, sessionKey, chatId }, "task interrupted");
+        } else {
+          logger.error({ err: error, taskId, sessionKey, chatId }, "task failed");
+        }
         throw error;
       } finally {
         taskAbortControllers.delete(taskId);
