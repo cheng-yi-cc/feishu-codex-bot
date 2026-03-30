@@ -194,4 +194,48 @@ describe("createCodexRunner", () => {
 
     expect(emitted).toEqual([]);
   });
+
+  it("rejects cleanly when onEvent throws during stream handling", async () => {
+    const child = createFakeChild();
+    const runner = createCodexRunner(
+      {
+        codexBin: "codex",
+        sandboxMode: "danger-full-access",
+        defaultWorkdir: "C:\\tmp",
+        timeoutMs: 1000,
+      },
+      (() => child as any) as any,
+    );
+
+    const settled = Promise.race([
+      runner
+        .run({
+          sessionKey: "s1",
+          prompt: "hello",
+          workdir: "C:\\tmp",
+          timeoutMs: 1000,
+          onEvent: () => {
+            throw new Error("progress callback failed");
+          },
+        })
+        .then(
+          () => "resolved",
+          (error) => (error instanceof Error ? error.message : String(error)),
+        ),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 100)),
+    ]);
+
+    setTimeout(() => {
+      child.stdout.write(
+        '{"type":"item.started","item":{"type":"tool_call","description":"Read src/index.ts"}}\n',
+      );
+      child.stdout.write(
+        '{"type":"item.completed","item":{"type":"agent_message","text":"late"}}\n',
+      );
+      child.emit("close", 0);
+    }, 10);
+
+    await expect(settled).resolves.toBe("progress callback failed");
+    expect(child.kill).toHaveBeenCalled();
+  });
 });

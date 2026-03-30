@@ -349,4 +349,148 @@ describe("createTaskOrchestrator", () => {
       }),
     );
   });
+
+  it("clears workspace lastErrorSummary on success and updates it on failure", async () => {
+    const successState = {
+      sessionKey: "dm:ou_allow",
+      mode: "dev" as const,
+      cwd: "D:\\repo\\custom",
+      branch: "feature/runtime",
+      lastTaskId: "old-task",
+      lastErrorSummary: "old failure",
+      updatedAt: 100,
+    };
+    const successSessionStore: Pick<
+      SessionStore,
+      "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
+    > = {
+      appendUser: vi.fn(),
+      appendAssistant: vi.fn(),
+      loadRecent: vi.fn(
+        (): SessionMessage[] => [
+          { role: "user", content: "retry task" },
+        ],
+      ),
+      getSessionOptions: vi.fn((): SessionOptions => ({})),
+    };
+    const successRuntimeStore: Pick<
+      RuntimeStore,
+      | "saveWorkspaceState"
+      | "getWorkspaceState"
+      | "createTask"
+      | "updateTaskStatus"
+      | "appendTaskEvent"
+      | "replaceTaskArtifacts"
+    > = {
+      saveWorkspaceState: vi.fn(),
+      getWorkspaceState: vi.fn(() => successState),
+      createTask: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      appendTaskEvent: vi.fn(),
+      replaceTaskArtifacts: vi.fn(),
+    };
+    const successRunner: CodexRunner = {
+      run: vi.fn(async () => ({ answer: "\u5df2\u5b8c\u6210", durationMs: 20 })),
+    };
+
+    const successOrchestrator = createTaskOrchestrator({
+      logger: pino({ enabled: false }),
+      config: makeConfig(),
+      sessionStore: successSessionStore,
+      runtimeStore: successRuntimeStore,
+      codexRunner: successRunner,
+    });
+
+    await successOrchestrator.startTask({
+      sessionKey: "dm:ou_allow",
+      chatId: "oc_1",
+      prompt: "retry task",
+      taskKind: "chat",
+    });
+
+    expect(successRuntimeStore.saveWorkspaceState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionKey: successState.sessionKey,
+        mode: successState.mode,
+        cwd: successState.cwd,
+        branch: successState.branch,
+        lastTaskId: expect.any(String),
+        lastErrorSummary: undefined,
+        updatedAt: expect.any(Number),
+      }),
+    );
+
+    const failureState = {
+      sessionKey: "dm:ou_allow",
+      mode: "dev" as const,
+      cwd: "D:\\repo\\custom",
+      branch: "feature/runtime",
+      lastTaskId: "old-task",
+      lastErrorSummary: undefined,
+      updatedAt: 100,
+    };
+    const failureSessionStore: Pick<
+      SessionStore,
+      "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
+    > = {
+      appendUser: vi.fn(),
+      appendAssistant: vi.fn(),
+      loadRecent: vi.fn(
+        (): SessionMessage[] => [
+          { role: "user", content: "broken task" },
+        ],
+      ),
+      getSessionOptions: vi.fn((): SessionOptions => ({})),
+    };
+    const failureRuntimeStore: Pick<
+      RuntimeStore,
+      | "saveWorkspaceState"
+      | "getWorkspaceState"
+      | "createTask"
+      | "updateTaskStatus"
+      | "appendTaskEvent"
+      | "replaceTaskArtifacts"
+    > = {
+      saveWorkspaceState: vi.fn(),
+      getWorkspaceState: vi.fn(() => failureState),
+      createTask: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      appendTaskEvent: vi.fn(),
+      replaceTaskArtifacts: vi.fn(),
+    };
+    const failureRunner: CodexRunner = {
+      run: vi.fn(async () => {
+        throw new Error("codex failed");
+      }),
+    };
+
+    const failureOrchestrator = createTaskOrchestrator({
+      logger: pino({ enabled: false }),
+      config: makeConfig(),
+      sessionStore: failureSessionStore,
+      runtimeStore: failureRuntimeStore,
+      codexRunner: failureRunner,
+    });
+
+    await expect(
+      failureOrchestrator.startTask({
+        sessionKey: "dm:ou_allow",
+        chatId: "oc_1",
+        prompt: "broken task",
+        taskKind: "chat",
+      }),
+    ).rejects.toThrow("codex failed");
+
+    expect(failureRuntimeStore.saveWorkspaceState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionKey: failureState.sessionKey,
+        mode: failureState.mode,
+        cwd: failureState.cwd,
+        branch: failureState.branch,
+        lastTaskId: expect.any(String),
+        lastErrorSummary: "codex failed",
+        updatedAt: expect.any(Number),
+      }),
+    );
+  });
 });

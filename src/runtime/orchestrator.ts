@@ -114,6 +114,7 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
       const controller = new AbortController();
       taskAbortControllers.set(taskId, controller);
       let taskCreated = false;
+      let existingState: WorkspaceState | undefined;
       let workdir = config.codexWorkdir;
 
       let eventSeq = 0;
@@ -128,7 +129,7 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
       };
 
       try {
-        const existingState = runtimeStore.getWorkspaceState(sessionKey);
+        existingState = runtimeStore.getWorkspaceState(sessionKey);
         workdir = existingState?.cwd ?? config.codexWorkdir;
 
         runtimeStore.createTask(buildTaskRecord(taskId, sessionKey, taskKind, prompt, queuedAt));
@@ -174,6 +175,10 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
           summary: text || undefined,
           errorSummary: undefined,
         });
+        runtimeStore.saveWorkspaceState({
+          ...resolveWorkspaceState(existingState, sessionKey, taskKind, taskId, workdir, finishedAt),
+          lastErrorSummary: undefined,
+        });
         appendEvent("result", "\u4efb\u52a1\u5b8c\u6210", finishedAt);
         runtimeStore.replaceTaskArtifacts(taskId, []);
 
@@ -208,6 +213,15 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
             runtimeStore.replaceTaskArtifacts(taskId, []);
           } catch (cleanupError) {
             logger.error({ err: cleanupError, taskId }, "failed to clear task artifacts during cleanup");
+          }
+
+          try {
+            runtimeStore.saveWorkspaceState({
+              ...resolveWorkspaceState(existingState, sessionKey, taskKind, taskId, workdir, finishedAt),
+              lastErrorSummary: message,
+            });
+          } catch (cleanupError) {
+            logger.error({ err: cleanupError, taskId }, "failed to persist workspace error summary during cleanup");
           }
         }
         logger.error({ err: error, taskId, sessionKey, chatId }, "task failed");

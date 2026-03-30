@@ -138,6 +138,10 @@ export function createCodexRunner(
         let stdoutBuffer = "";
         let finished = false;
         let abortHandler: (() => void) | undefined;
+        let handleStdoutData: ((chunk: Buffer) => void) | undefined;
+        let handleStderrData: ((chunk: Buffer) => void) | undefined;
+        let handleError: ((err: Error) => void) | undefined;
+        let handleClose: ((code: number | null) => void) | undefined;
 
         const finish = () => {
           finished = true;
@@ -147,14 +151,47 @@ export function createCodexRunner(
           if (abortHandler && request.abortSignal) {
             request.abortSignal.removeEventListener("abort", abortHandler);
           }
+          if (handleStdoutData) {
+            child.stdout.off("data", handleStdoutData);
+          }
+          if (handleStderrData) {
+            child.stderr.off("data", handleStderrData);
+          }
+          if (handleError) {
+            child.off("error", handleError);
+          }
+          if (handleClose) {
+            child.off("close", handleClose);
+          }
+        };
+
+        const failRun = (error: unknown, shouldKillChild = true) => {
+          if (finished) {
+            return;
+          }
+
+          finish();
+          clearTimeout(timeout);
+          cleanup();
+          if (shouldKillChild) {
+            child.kill();
+          }
+          reject(error instanceof Error ? error : new Error(String(error)));
+        };
+
+        const applyLine = (line: string): boolean => {
+          try {
+            applyCodexJsonLine(line, state, request.onEvent);
+            return true;
+          } catch (error) {
+            failRun(error);
+            return false;
+          }
         };
 
         const timeout = setTimeout(() => {
           if (!finished) {
-            finish();
-            cleanup();
-            child.kill();
-            reject(new Error(`codex execution timed out after ${timeoutMs}ms`));
+            failRun(new Error(`codex execution timed out after ${timeoutMs}ms`));
           }
         }, timeoutMs);
 
@@ -164,11 +201,7 @@ export function createCodexRunner(
               return;
             }
 
-            finish();
-            clearTimeout(timeout);
-            cleanup();
-            child.kill();
-            reject(new Error("codex execution aborted"));
+            failRun(new Error("codex execution aborted"));
           };
 
           if (request.abortSignal.aborted) {
@@ -179,7 +212,7 @@ export function createCodexRunner(
           request.abortSignal.addEventListener("abort", abortHandler, { once: true });
         }
 
-        child.stdout.on("data", (chunk: Buffer) => {
+        handleStdoutData = (chunk: Buffer) => {
           if (finished) {
             return;
           }
@@ -190,26 +223,28 @@ export function createCodexRunner(
               return;
             }
             const line = stdoutBuffer.slice(0, idx);
-            applyCodexJsonLine(line, state, request.onEvent);
+            if (!applyLine(line)) {
+              return;
+            }
             stdoutBuffer = stdoutBuffer.slice(idx + 1);
             idx = stdoutBuffer.indexOf("\n");
           }
-        });
+        };
+        child.stdout.on("data", handleStdoutData);
 
-        child.stderr.on("data", (chunk: Buffer) => {
+        handleStderrData = (chunk: Buffer) => {
           if (stderrChunks.length < 50) {
             stderrChunks.push(chunk.toString("utf8"));
           }
-        });
+        };
+        child.stderr.on("data", handleStderrData);
 
-        child.on("error", (err) => {
-          clearTimeout(timeout);
-          cleanup();
-          finish();
-          reject(err);
-        });
+        handleError = (err: Error) => {
+          failRun(err, false);
+        };
+        child.on("error", handleError);
 
-        child.on("close", (code) => {
+        handleClose = (code: number | null) => {
           if (finished) {
             clearTimeout(timeout);
             cleanup();
@@ -220,7 +255,12 @@ export function createCodexRunner(
           cleanup();
           finish();
           if (stdoutBuffer.trim()) {
-            applyCodexJsonLine(stdoutBuffer, state, request.onEvent);
+            try {
+              applyCodexJsonLine(stdoutBuffer, state, request.onEvent);
+            } catch (error) {
+              reject(error instanceof Error ? error : new Error(String(error)));
+              return;
+            }
           }
 
           if (code !== 0) {
@@ -230,7 +270,8 @@ export function createCodexRunner(
           }
 
           resolve();
-        });
+        };
+        child.on("close", handleClose);
       });
 
       if (!state.answer) {
