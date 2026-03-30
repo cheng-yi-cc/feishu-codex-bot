@@ -9,7 +9,7 @@ import { downloadIncomingAttachment, type DownloadedAttachment } from "../feishu
 import { sendFileReply, sendImageReply, sendReplyInChunks } from "../feishu/sender.js";
 import { addTypingIndicator, removeTypingIndicator } from "../feishu/typing.js";
 import { enforceAccessPolicy } from "./access-control.js";
-import { parseCommand, type ParsedCommand } from "./commands.js";
+import { parseCommand } from "./commands.js";
 import { SerialTaskQueue } from "./queue.js";
 
 export type RuntimeStatus = {
@@ -260,8 +260,15 @@ export function createMessageHandler(deps: HandlerDeps) {
       return;
     }
 
-    const askCommand = command as Extract<ParsedCommand, { kind: "ask" }>;
-    const normalizedPrompt = buildUserPrompt(message, askCommand.prompt);
+    if (command.kind !== "ask") {
+      logger.info(
+        { messageId: message.messageId, commandKind: command.kind },
+        "message ignored: workspace intent not yet handled in message handler",
+      );
+      return;
+    }
+
+    const normalizedPrompt = buildUserPrompt(message, command.prompt);
     if (!normalizedPrompt) {
       logger.info({ messageId: message.messageId }, "ask command missing prompt");
       await sendTextReply(deps, message, "用法: /ask 你的问题");
