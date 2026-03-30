@@ -16,6 +16,20 @@ export function openSessionDatabase(dbPath: string): Database.Database {
 }
 
 function loadSessionSchemaSql(): string {
-  const schemaPath = new URL("./schema.sql", import.meta.url);
-  return fs.readFileSync(schemaPath, "utf8");
+  const schemaCandidates = [
+    new URL("./schema.sql", import.meta.url),
+    new URL("../../src/session/schema.sql", import.meta.url),
+  ];
+
+  for (const schemaPath of schemaCandidates) {
+    try {
+      return fs.readFileSync(schemaPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error("Unable to locate session schema SQL.");
 }

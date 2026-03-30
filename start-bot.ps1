@@ -38,9 +38,17 @@ function Invoke-LoggedProcess {
     [string[]]$ArgumentList
   )
 
+  $quotedArguments = $ArgumentList | ForEach-Object {
+    if ($_ -match '[\s"]') {
+      '"' + ($_.Replace('"', '\"')) + '"'
+    } else {
+      $_
+    }
+  }
+
   $process = Start-Process `
     -FilePath $FilePath `
-    -ArgumentList $ArgumentList `
+    -ArgumentList ($quotedArguments -join " ") `
     -WorkingDirectory $projectRoot `
     -RedirectStandardOutput $stdout `
     -RedirectStandardError $stderr `
@@ -115,7 +123,7 @@ try {
   }
 
   Write-StartLog "starting bot via $nodeCmd"
-  $exitCode = Invoke-LoggedProcess -FilePath $nodeCmd -ArgumentList @($entrypoint)
+  $exitCode = Invoke-LoggedProcess -FilePath $nodeCmd -ArgumentList @("dist/index.js")
   Write-StartLog "bot exited with code=$exitCode"
   exit $exitCode
 } finally {
