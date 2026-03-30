@@ -3,177 +3,167 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Feishu Codex Bot - 你的私有 AI 开发工作台</title>
+    <title>FEISHU_CODEX_BOT // TERMINAL</title>
     <meta name="description" content="把本机 Codex CLI 能力接到飞书私聊里，实现持续可恢复的开发会话和本地高权限自动化的大模型编码助手。">
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Syne:wght@600;800&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="glow-bg"></div>
+    <div class="crt-overlay"></div>
+    <div class="grid-bg"></div>
 
     <header class="navbar">
         <div class="container nav-content">
-            <div class="logo">
-                <div class="logo-icon"></div>
-                <span>FeishuCodexBot</span>
-            </div>
+            <div class="logo group-glitch" data-text="FEISHU::CODEX_BOT">FEISHU::CODEX_BOT</div>
             <nav class="nav-links">
-                <a href="#features">功能特性</a>
-                <a href="#workflow">工作流</a>
-                <a href="#quickstart">快速开始</a>
+                <a href="#features">[ 01_FEATURES ]</a>
+                <a href="#workflow">[ 02_WORKFLOW ]</a>
+                <a href="#quickstart">[ 03_INIT ]</a>
                 <a href="https://github.com/cheng-yi-cc/feishu-codex-bot" class="btn btn-outline" target="_blank">
-                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
-                    GitHub
+                    GITHUB_REPO↗
                 </a>
             </nav>
         </div>
+        <div class="progress-bar"></div>
     </header>
 
     <main>
         <section class="hero container">
             <div class="hero-content">
-                <div class="badge">🚀 v1.0 混合型工作台就绪</div>
-                <h1 class="hero-title">连接飞书与本地算力<br><span class="gradient-text">重塑你的 AI 开发流</span></h1>
+                <div class="marquee-container">
+                    <div class="marquee-content">
+                        * SYSTEM V1.0 ONLINE * HYBRID WORKSPACE READY * NO MORE COPY-PASTE *
+                    </div>
+                </div>
+                <h1 class="hero-title reveal-text">
+                    REWIRE YOUR <br>
+                    <span class="accent-text">DEVELOPMENT.<br>PIPELINE.</span>
+                </h1>
                 <p class="hero-desc">
-                    把本机 Codex CLI 的强大能力无缝接入飞书私聊。长连接持久化状态、工作区级别上下文感知，专为 Windows 开发机打造的单人私用智能 AI 编码工作台。
+                    A hyper-local AI coding workstation embedded directly inside Feishu. Give it orders, let it execute terminal commands. No tabs. No context switching. Just raw local power.
                 </p>
                 <div class="hero-actions">
-                    <a href="#quickstart" class="btn btn-primary">快速开始</a>
-                    <a href="#features" class="btn btn-secondary">了解更多</a>
+                    <a href="#quickstart" class="btn btn-primary">INITIALIZE_NOW</a>
+                    <a href="#features" class="btn btn-secondary">READ_MANUAL</a>
                 </div>
             </div>
             <div class="hero-graphic">
-                <div class="glass-card mockup-card">
-                    <div class="mockup-header">
-                        <span class="dot red"></span>
-                        <span class="dot yellow"></span>
-                        <span class="dot green"></span>
-                        <div class="mockup-title">Feishu Workspace</div>
+                <div class="terminal-card">
+                    <div class="terminal-header">
+                        <div class="terminal-actions">
+                            <span class="t-dot"></span>
+                            <span class="t-dot"></span>
+                            <span class="t-dot"></span>
+                        </div>
+                        <div class="terminal-title">~/feishu-workspace/sys.log</div>
                     </div>
-                    <div class="mockup-body">
-                        <div class="chat-message user">
-                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" class="avatar">
-                            <div class="bubble">帮我梳理当前仓库的启动链路，并转成 Markdown</div>
-                        </div>
-                        <div class="chat-message bot">
-                            <div class="bot-icon">FC</div>
-                            <div class="bubble">
-                                <div class="thinking">Codex 思考中... [High intensity]</div>
-                                已解析当前项目 `start-bot.ps1`。启动链路如下：<br>
-                                1. 解析 Node 工具<br>
-                                2. 前台启动 dist/index.js<br>
-                                3. 避免防潮门多进程冲突拉起锁...<br>
-                                <strong>💡 提示: /mode current is `dev`</strong>
-                            </div>
-                        </div>
+                    <div class="terminal-body" id="term-typing">
+                        <div class="line"><span class="prompt">user@local:~$</span> /mode dev</div>
+                        <div class="line sys-msg">[SYSTEM] MODE SWITCHED TO DEVELOPMENT</div>
+                        <div class="line"><span class="prompt">user@local:~$</span> /ask refactor the login flow and run tests</div>
+                        <div class="line sys-msg">... ACQUIRING CONTEXT ...</div>
+                        <div class="line accent-msg">>> EXECUTING OVERRIDE <<</div>
+                        <div class="line sys-msg">File modified: src/auth.ts</div>
+                        <div class="line sys-msg">Tests: 15 passed, 0 failed.</div>
+                        <div class="line cursor-blink">_</div>
                     </div>
                 </div>
-                <!-- Generated Graphic Will Be Placed Here as an overlay -->
-                <img src="assets/hero.png" alt="AI Agent Visual" class="floating-img">
+                <!-- Dynamic AI Image as brutalist poster -->
+                <div class="poster-image">
+                    <img src="assets/hero.png" alt="Node Visual">
+                    <div class="poster-overlay"></div>
+                </div>
             </div>
         </section>
 
         <section id="features" class="features container">
-            <div class="section-header">
-                <h2>为什么选择 <span class="gradient-text">Feishu Codex Bot</span></h2>
-                <p>不仅仅是一次性问答，更是拥有完备“工作区”概念的个人开发平台。</p>
-            </div>
+            <div class="section-mark">01 // CORE_MODULES</div>
             <div class="feature-grid">
-                <div class="feature-card glass-card">
-                    <div class="icon-box blue">💬</div>
-                    <h3>自然交互与精确指令融合</h3>
-                    <p>平时像聊天一样在私聊直达需求。需要时，保留 <code>/mode</code>、<code>/cwd</code>、<code>/run</code> 等显式控制命令精细控制引擎。</p>
+                <div class="feature-block">
+                    <div class="fb-number">001</div>
+                    <h3 class="fb-title">NATURAL_LANGUAGE_CLI</h3>
+                    <p class="fb-desc">Bypass the GUI. Send natural language straight into your local workspace. Need precise control? Fall back to strict commands like <code>/cwd</code> or <code>/run</code>.</p>
                 </div>
-                <div class="feature-card glass-card">
-                    <div class="icon-box purple">🧠</div>
-                    <h3>长期记忆与持久化</h3>
-                    <p>采用 SQLite 持久化存储，你的每个历史指令、当前工作目录、以及错误摘要都被牢牢记住，随时 <code>/resume</code>。</p>
+                <div class="feature-block">
+                    <div class="fb-number">002</div>
+                    <h3 class="fb-title">PERSISTENT_MEMORY</h3>
+                    <p class="fb-desc">SQLite-backed context state. It remembers your working directory, branch, and crash logs. Reconnect anytime with <code>/resume</code>.</p>
                 </div>
-                <div class="feature-card glass-card">
-                    <div class="icon-box cyan">⚡</div>
-                    <h3>任务编排与并发控制</h3>
-                    <p>任务编排与串行队列机制，完美解决资源冲突与并发写坏。让 Codex 安安稳稳在你的本机工作区处理文件。</p>
+                <div class="feature-block">
+                    <div class="fb-number">003</div>
+                    <h3 class="fb-title">SERIAL_EXECUTION</h3>
+                    <p class="fb-desc">Task orchestration with strict queues. Prevents race conditions and stops the AI from destroying your file system with concurrent writes.</p>
                 </div>
-                <div class="feature-card glass-card">
-                    <div class="icon-box pink">📎</div>
-                    <h3>无缝附件传递</h3>
-                    <p>支持将飞书图片或文档发送给机器人，下载并在本地处理；也可让大模型反向通过指令发回成果。</p>
+                <div class="feature-block">
+                    <div class="fb-number">004</div>
+                    <h3 class="fb-title">ATTACHMENT_PIPELINE</h3>
+                    <p class="fb-desc">Drag and drop logs or screenshots directly into Feishu. The bot pulls them securely into the local sandbox for immediate visual analysis.</p>
                 </div>
             </div>
         </section>
 
-        <section id="workflow" class="workflow">
-            <div class="container">
-                <div class="section-header text-center">
-                    <h2>闭环的工作原理</h2>
-                    <p>安全稳定地穿透内外网，实现本地高权限自动化</p>
+        <section id="workflow" class="workflow container">
+            <div class="section-mark">02 // ARCHITECTURE_FLOW</div>
+            <div class="flow-container">
+                <div class="flow-node">
+                    <div class="node-label">INPUT</div>
+                    <div class="node-title">FEISHU_IM</div>
+                    <p>Commands & Attachments via WebSocket connection.</p>
                 </div>
-                <div class="workflow-steps">
-                    <div class="step glass-card">
-                        <div class="step-num">1</div>
-                        <h4>飞书交互</h4>
-                        <p>通过私聊或群聊发送请求与附件</p>
-                    </div>
-                    <div class="step-arrow">→</div>
-                    <div class="step glass-card">
-                        <div class="step-num">2</div>
-                        <h4>状态解析</h4>
-                        <p>SQLite 拉取会话参数、提取上下文</p>
-                    </div>
-                    <div class="step-arrow">→</div>
-                    <div class="step glass-card">
-                        <div class="step-num">3</div>
-                        <h4>本地执行</h4>
-                        <p>交付 Codex CLI，在指定工作目录运行指令</p>
-                    </div>
-                    <div class="step-arrow">→</div>
-                    <div class="step glass-card">
-                        <div class="step-num">4</div>
-                        <h4>结果回传</h4>
-                        <p>任务进度、代码产物或附件回传给开发者</p>
-                    </div>
+                <div class="flow-link"></div>
+                <div class="flow-node highlight">
+                    <div class="node-label">ORCHESTRATE</div>
+                    <div class="node-title">LOCAL_BOT</div>
+                    <p>State extraction, queue management, intent parsing.</p>
+                </div>
+                <div class="flow-link"></div>
+                <div class="flow-node">
+                    <div class="node-label">EXECUTION</div>
+                    <div class="node-title">CODEX_CLI</div>
+                    <p>Direct filesystem access. Spawns tasks and tests.</p>
                 </div>
             </div>
         </section>
 
         <section id="quickstart" class="quickstart container">
-            <div class="section-header">
-                <h2>快速接入你的机器</h2>
-                <p>三步完成本地 Windows 开发机的部署与自启动</p>
-            </div>
-            <div class="code-window glass-card">
-                <div class="mockup-header">
-                    <span class="dot red"></span>
-                    <span class="dot yellow"></span>
-                    <span class="dot green"></span>
-                    <span class="mockup-title">powershell</span>
-                </div>
-                <div class="code-content">
-<pre><code><span class="comment"># 1. 确保已安装 Node.js 和 codex cli</span>
+             <div class="section-mark">03 // BOOTSTRAP</div>
+             <div class="flex-quickstart">
+                 <div class="qs-text">
+                     <h2 class="qs-title">DEPLOY_INSTANCE</h2>
+                     <p>Get the environment up and running on your Windows machine in bare seconds. Requires Node.js and Codex CLI pre-installed.</p>
+                     <ul class="qs-list">
+                         <li>► Clone repository</li>
+                         <li>► Setup `.env` config</li>
+                         <li>► Start monitoring loop</li>
+                     </ul>
+                 </div>
+                 <div class="qs-code snippet-box">
+<pre><code><span class="dim"># VERIFY CODEX</span>
 codex login status
 
-<span class="comment"># 2. 克隆仓库并安装依赖</span>
+<span class="dim"># CLONE & INSTALL</span>
 git clone https://github.com/cheng-yi-cc/feishu-codex-bot.git
 cd feishu-codex-bot
 npm install
 
-<span class="comment"># 3. 复制环境变量并按文档配置飞书密钥</span>
+<span class="dim"># CONFIGURE SECRETS</span>
 Copy-Item .env.example .env
 
-<span class="comment"># 4. 生产配置与跑通健康检查</span>
-npm run typecheck && npm test && npm run build
+<span class="dim"># COMPILE & RUN</span>
+npm run typecheck && npm run build
 npm run start</code></pre>
-                </div>
-            </div>
+                 </div>
+             </div>
         </section>
 
         <section class="cta container">
-            <div class="cta-box glass-card">
-                <h2>准备好升级你的研发体验了吗？</h2>
-                <p>全面拥抱 Agentic IDE 的新未来，立即搭建你个人的飞书智能助理。</p>
-                <div class="btn-group">
-                    <a href="https://github.com/cheng-yi-cc/feishu-codex-bot/blob/master/docs/feishu-setup.md" class="btn btn-primary" target="_blank">查阅飞书平台配置文档</a>
-                    <a href="https://github.com/cheng-yi-cc/feishu-codex-bot" class="btn btn-outline" target="_blank">获取源码</a>
+            <div class="cta-banner">
+                <div class="cta-bg-noise"></div>
+                <h2>SYSTEM_READY. <br>AWAITING_INPUT...</h2>
+                <div class="cta-actions">
+                    <a href="https://github.com/cheng-yi-cc/feishu-codex-bot" class="btn btn-primary glitch-btn">DEPLOY_NOW</a>
                 </div>
             </div>
         </section>
@@ -181,11 +171,14 @@ npm run start</code></pre>
 
     <footer>
         <div class="container footer-content">
-            <p>© 2026 Feishu Codex Bot Project. All rights reserved.</p>
-            <div class="footer-links">
-                <a href="https://github.com/cheng-yi-cc/feishu-codex-bot">GitHub Repository</a>
-                <a href="#">Documentation</a>
-                <a href="#">Report Issue</a>
+            <div class="f-left">
+                <span>[ STATUS: ACTIVE ]</span>
+                <span class="dim">© 2026 CHENG-YI-CC</span>
+            </div>
+            <div class="f-right">
+                <a href="https://github.com/cheng-yi-cc/feishu-codex-bot">GH_REPO</a>
+                <a href="#">DOCS</a>
+                <a href="#">SYS_LOG</a>
             </div>
         </div>
     </footer>
