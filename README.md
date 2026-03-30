@@ -88,7 +88,7 @@ pm2 restart feishu-codex-bot
 
 ## Windows Startup
 
-Production startup uses `start-bot.ps1`, which builds `dist/index.js` on demand and writes logs to `logs/app.log` and `logs/app.err.log`.
+Production startup uses `start-bot.ps1`, which resolves `node` and `npm`, builds `dist/index.js` on demand, keeps the Node process in the foreground for Task Scheduler, and writes logs to `logs/app.log`, `logs/app.err.log`, and `logs/start-bot.log`.
 
 Register the startup task with:
 
@@ -96,7 +96,7 @@ Register the startup task with:
 powershell -ExecutionPolicy Bypass -File .\scripts\install-startup-task.ps1
 ```
 
-After registration, verify `GET /healthz` returns the expected `codexWorkdir`, `logDir`, and `supervisor.restartCount`.
+After registration, verify `GET /healthz` returns the expected `codexWorkdir`, `logDir`, and `supervisor.restartCount`. The startup task is configured to ignore duplicate launches and to run without the default task execution time limit.
 
 ## Commands in Feishu
 

@@ -27,8 +27,9 @@
 - [ ] Codex timeout returns retry message
 - [ ] `GET /healthz` includes `codexWorkdir`, `logDir`, and `supervisor.restartCount`
 - [ ] Missing `CODEX_BIN` fails startup before the app begins monitoring Feishu
-- [ ] `start-bot.ps1` builds `dist/index.js` when missing and launches the built app
+- [ ] `start-bot.ps1` builds `dist/index.js` when missing, stays attached to `node dist/index.js`, and returns the bot exit code
 - [ ] Windows startup task registration succeeds via `scripts/install-startup-task.ps1`
+- [ ] Scheduled task settings show duplicate launches ignored and no execution time limit
 
 ## Feishu Console Validation
 

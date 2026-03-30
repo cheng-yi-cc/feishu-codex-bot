@@ -12,6 +12,8 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
   -StartWhenAvailable `
+  -MultipleInstances IgnoreNew `
+  -ExecutionTimeLimit ([TimeSpan]::Zero) `
   -RestartCount 3 `
   -RestartInterval (New-TimeSpan -Minutes 1)
 

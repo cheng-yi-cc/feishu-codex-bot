@@ -15,6 +15,7 @@ export function createAppSupervisor(input: {
   logger: Logger;
   config: BotConfig;
   verifyBinary?: (value: string) => Promise<boolean>;
+  wait?: (ms: number) => Promise<void>;
   startApplication: () => Promise<AppSupervisorHandle>;
 }) {
   const verifyBinary =
@@ -29,6 +30,9 @@ export function createAppSupervisor(input: {
         return false;
       }
     });
+  const wait =
+    input.wait ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   let restartCount = 0;
   let currentApp: AppSupervisorHandle | undefined;
@@ -44,21 +48,45 @@ export function createAppSupervisor(input: {
     }
   }
 
+  async function stopCurrentApp(): Promise<void> {
+    if (currentApp) {
+      await currentApp.stop();
+      currentApp = undefined;
+    }
+  }
+
+  function recordRestart(error: unknown, message: string): void {
+    restartCount += 1;
+    lastErrorAt = Date.now();
+    input.logger.error({ err: error, restartCount }, message);
+  }
+
   return {
     async start(): Promise<void> {
-      await preflight();
-      currentApp = await input.startApplication();
-    },
-    async stop(): Promise<void> {
-      if (currentApp) {
-        await currentApp.stop();
-        currentApp = undefined;
+      let attempts = 0;
+
+      while (true) {
+        try {
+          await preflight();
+          currentApp = await input.startApplication();
+          return;
+        } catch (error) {
+          await stopCurrentApp();
+
+          if (attempts >= input.config.supervisorMaxRestarts) {
+            recordRestart(error, "application start failed and restart limit was reached");
+            throw error;
+          }
+
+          recordRestart(error, "application start failed; retrying");
+          attempts += 1;
+          await wait(input.config.supervisorRestartDelayMs);
+        }
       }
     },
+    stop: stopCurrentApp,
     markRestart(error: unknown): void {
-      restartCount += 1;
-      lastErrorAt = Date.now();
-      input.logger.error({ err: error, restartCount }, "application restart requested");
+      recordRestart(error, "application restart requested");
     },
     getSnapshot(): AppSupervisorSnapshot {
       return { restartCount, lastErrorAt };

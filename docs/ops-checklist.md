@@ -8,6 +8,7 @@
 - `LOG_DIR` exists or can be created by the bot
 - `FEISHU_ALLOW_OPEN_IDS` contains intended pilot users
 - `start-bot.ps1` points at this checkout and `dist/index.js` is buildable
+- `node.exe` and `npm.cmd` resolve successfully from the account that will run the startup task
 - Startup task installed with `scripts/install-startup-task.ps1` when running as a boot service
 
 ## Start Verification
@@ -27,6 +28,7 @@
 - Bot replies to `/status`
 - `/new` clears session context
 - `logs/app.log` and `logs/app.err.log` are updating
+- `logs/start-bot.log` shows the last launch attempt and exit code
 - `supervisor.lastErrorAt` remains `null` during steady state
 
 ## Incident Triage
@@ -44,6 +46,7 @@
 
 - If the startup task launches but the bot never stays healthy:
 - rerun `.\start-bot.ps1` manually from PowerShell
+- inspect `logs/start-bot.log` for command resolution, build, or duplicate-process skips
 - confirm `dist/index.js` exists after build
 - open Task Scheduler history for `FeishuCodexWorkspaceBot`
 
