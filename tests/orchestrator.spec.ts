@@ -198,6 +198,8 @@ describe("createTaskOrchestrator", () => {
   });
 
   it("preserves an existing workspace state when saving lastTaskId for a non-dev task", async () => {
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-orchestrator-preserve-"));
+    tempPaths.push(workspaceRoot);
     const sessionStore: Pick<
       SessionStore,
       "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
@@ -215,7 +217,7 @@ describe("createTaskOrchestrator", () => {
     const existingState = {
       sessionKey: "dm:ou_allow",
       mode: "dev" as const,
-      cwd: "D:\\repo\\custom",
+      cwd: workspaceRoot,
       branch: "feature/runtime",
       lastTaskId: "old-task",
       lastErrorSummary: "previous warning",
@@ -245,7 +247,7 @@ describe("createTaskOrchestrator", () => {
 
     const orchestrator = createTaskOrchestrator({
       logger: pino({ enabled: false }),
-      config: makeConfig(),
+      config: makeConfigWithWorkdir(workspaceRoot),
       sessionStore,
       runtimeStore,
       codexRunner,
@@ -269,6 +271,71 @@ describe("createTaskOrchestrator", () => {
         updatedAt: expect.any(Number),
       }),
     );
+  });
+
+  it("rejects a stored workspace cwd that points outside the configured workspace root", async () => {
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-orchestrator-root-"));
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-orchestrator-outside-"));
+    tempPaths.push(workspaceRoot, outsideRoot);
+
+    const sessionStore: Pick<
+      SessionStore,
+      "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
+    > = {
+      appendUser: vi.fn(),
+      appendAssistant: vi.fn(),
+      loadRecent: vi.fn(() => []),
+      getSessionOptions: vi.fn((): SessionOptions => ({})),
+    };
+
+    const runtimeStore: Pick<
+      RuntimeStore,
+      | "saveWorkspaceState"
+      | "getWorkspaceState"
+      | "createTask"
+      | "updateTaskStatus"
+      | "appendTaskEvent"
+      | "replaceTaskArtifacts"
+    > = {
+      saveWorkspaceState: vi.fn(),
+      getWorkspaceState: vi.fn(() => ({
+        sessionKey: "dm:ou_allow",
+        mode: "dev" as const,
+        cwd: outsideRoot,
+        branch: "main",
+        lastTaskId: "old-task",
+        lastErrorSummary: undefined,
+        updatedAt: Date.now(),
+      })),
+      createTask: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      appendTaskEvent: vi.fn(),
+      replaceTaskArtifacts: vi.fn(),
+    };
+
+    const codexRunner: CodexRunner = {
+      run: vi.fn(async () => ({ answer: "unused", durationMs: 1 })),
+    };
+
+    const orchestrator = createTaskOrchestrator({
+      logger: pino({ enabled: false }),
+      config: makeConfigWithWorkdir(workspaceRoot),
+      sessionStore,
+      runtimeStore,
+      codexRunner,
+    });
+
+    await expect(
+      orchestrator.startTask({
+        sessionKey: "dm:ou_allow",
+        chatId: "oc_1",
+        prompt: "unsafe cwd",
+        taskKind: "dev",
+      }),
+    ).rejects.toThrow(/outside the configured workspace root/i);
+
+    expect(codexRunner.run).not.toHaveBeenCalled();
+    expect(runtimeStore.createTask).not.toHaveBeenCalled();
   });
 
   it("does not leak directive markup into returned text, history, or summary", async () => {
@@ -351,10 +418,13 @@ describe("createTaskOrchestrator", () => {
   });
 
   it("clears workspace lastErrorSummary on success and updates it on failure", async () => {
+    const successWorkdir = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-orchestrator-success-"));
+    const failureWorkdir = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-orchestrator-failure-"));
+    tempPaths.push(successWorkdir, failureWorkdir);
     const successState = {
       sessionKey: "dm:ou_allow",
       mode: "dev" as const,
-      cwd: "D:\\repo\\custom",
+      cwd: successWorkdir,
       branch: "feature/runtime",
       lastTaskId: "old-task",
       lastErrorSummary: "old failure",
@@ -395,7 +465,7 @@ describe("createTaskOrchestrator", () => {
 
     const successOrchestrator = createTaskOrchestrator({
       logger: pino({ enabled: false }),
-      config: makeConfig(),
+      config: makeConfigWithWorkdir(successWorkdir),
       sessionStore: successSessionStore,
       runtimeStore: successRuntimeStore,
       codexRunner: successRunner,
@@ -423,7 +493,7 @@ describe("createTaskOrchestrator", () => {
     const failureState = {
       sessionKey: "dm:ou_allow",
       mode: "dev" as const,
-      cwd: "D:\\repo\\custom",
+      cwd: failureWorkdir,
       branch: "feature/runtime",
       lastTaskId: "old-task",
       lastErrorSummary: undefined,
@@ -466,7 +536,7 @@ describe("createTaskOrchestrator", () => {
 
     const failureOrchestrator = createTaskOrchestrator({
       logger: pino({ enabled: false }),
-      config: makeConfig(),
+      config: makeConfigWithWorkdir(failureWorkdir),
       sessionStore: failureSessionStore,
       runtimeStore: failureRuntimeStore,
       codexRunner: failureRunner,
@@ -495,10 +565,12 @@ describe("createTaskOrchestrator", () => {
   });
 
   it("persists aborted runs as interrupted and keeps workspace error state clear", async () => {
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "feishu-orchestrator-abort-"));
+    tempPaths.push(workspaceRoot);
     const existingState = {
       sessionKey: "dm:ou_allow",
       mode: "dev" as const,
-      cwd: "D:\\repo\\custom",
+      cwd: workspaceRoot,
       branch: "feature/runtime",
       lastTaskId: "old-task",
       lastErrorSummary: "older failure",
@@ -546,7 +618,7 @@ describe("createTaskOrchestrator", () => {
 
     const orchestrator = createTaskOrchestrator({
       logger: pino({ enabled: false }),
-      config: makeConfig(),
+      config: makeConfigWithWorkdir(workspaceRoot),
       sessionStore,
       runtimeStore,
       codexRunner,
@@ -579,5 +651,83 @@ describe("createTaskOrchestrator", () => {
         updatedAt: expect.any(Number),
       }),
     );
+  });
+
+  it("aborts an in-flight workspace command", async () => {
+    let capturedSignal: AbortSignal | undefined;
+
+    const sessionStore: Pick<
+      SessionStore,
+      "appendUser" | "appendAssistant" | "loadRecent" | "getSessionOptions"
+    > = {
+      appendUser: vi.fn(),
+      appendAssistant: vi.fn(),
+      loadRecent: vi.fn(() => []),
+      getSessionOptions: vi.fn((): SessionOptions => ({})),
+    };
+
+    const runtimeStore: Pick<
+      RuntimeStore,
+      | "saveWorkspaceState"
+      | "getWorkspaceState"
+      | "createTask"
+      | "updateTaskStatus"
+      | "appendTaskEvent"
+      | "replaceTaskArtifacts"
+    > = {
+      saveWorkspaceState: vi.fn(),
+      getWorkspaceState: vi.fn(() => ({
+        sessionKey: "dm:ou_allow",
+        mode: "dev" as const,
+        cwd: process.cwd(),
+        branch: "main",
+        lastTaskId: undefined,
+        lastErrorSummary: undefined,
+        updatedAt: Date.now(),
+      })),
+      createTask: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      appendTaskEvent: vi.fn(),
+      replaceTaskArtifacts: vi.fn(),
+    };
+
+    const orchestrator = createTaskOrchestrator({
+      logger: pino({ enabled: false }),
+      config: makeConfigWithWorkdir(process.cwd()),
+      sessionStore,
+      runtimeStore,
+      codexRunner: { run: vi.fn() },
+      workspaceCommandRunner: {
+        run: vi.fn(async ({ abortSignal }) => {
+          capturedSignal = abortSignal;
+          await new Promise((_, reject) => {
+            abortSignal?.addEventListener(
+              "abort",
+              () => reject(Object.assign(new Error("workspace command aborted"), { name: "AbortError" })),
+              { once: true },
+            );
+          });
+          return { exitCode: 0, stdout: "", stderr: "" };
+        }),
+      },
+    });
+
+    const running = orchestrator.handleWorkspaceCommand({
+      sessionKey: "dm:ou_allow",
+      command: "run",
+      value: 'Write-Output "slow"',
+    });
+
+    await vi.waitFor(() => {
+      expect(capturedSignal).toBeDefined();
+    });
+
+    const abortResult = await orchestrator.handleWorkspaceCommand({
+      sessionKey: "dm:ou_allow",
+      command: "abort",
+    });
+
+    expect(abortResult.text).toMatch(/终止|abort/i);
+    await expect(running).rejects.toMatchObject({ name: "AbortError" });
   });
 });

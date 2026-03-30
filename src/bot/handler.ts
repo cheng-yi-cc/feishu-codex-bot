@@ -284,6 +284,10 @@ export function createMessageHandler(deps: HandlerDeps) {
           });
           await sendTextReply(deps, message, renderWorkspaceCommandReply(result.text));
         } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") {
+            logger.info({ messageId: message.messageId }, "workspace command aborted");
+            return;
+          }
           runtimeStatus.lastErrorAt = Date.now();
           logger.error({ err: error, messageId: message.messageId }, "workspace command failed");
           await sendTextReply(deps, message, renderWorkspaceCommandErrorReply(error));

@@ -18,6 +18,8 @@ import type {
   WorkspaceState,
 } from "./types.js";
 
+type WorkspaceCommandRunner = ReturnType<typeof createWorkspaceCommandRunner>;
+
 type TaskOrchestratorDeps = {
   logger: Logger;
   config: BotConfig;
@@ -32,6 +34,7 @@ type TaskOrchestratorDeps = {
     | "replaceTaskArtifacts"
   >;
   codexRunner: CodexRunner;
+  workspaceCommandRunner?: Pick<WorkspaceCommandRunner, "run">;
 };
 
 export type StartTaskParams = {
@@ -49,7 +52,8 @@ export type StartTaskResult = {
 };
 
 const taskAbortControllers = new Map<string, AbortController>();
-const workspaceCommandRunner = createWorkspaceCommandRunner({
+const workspaceCommandAbortControllers = new Map<string, AbortController>();
+const defaultWorkspaceCommandRunner = createWorkspaceCommandRunner({
   shell: "powershell.exe",
   maxOutputChars: 4000,
 });
@@ -65,6 +69,7 @@ function resolveWorkspaceState(
   if (state) {
     return {
       ...state,
+      cwd: workdir,
       lastTaskId: taskId,
       updatedAt,
     };
@@ -186,6 +191,7 @@ function buildWorkspaceCommandText(
 
 export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
   const { logger, config, sessionStore, runtimeStore, codexRunner } = deps;
+  const workspaceCommandRunner = deps.workspaceCommandRunner ?? defaultWorkspaceCommandRunner;
 
   return {
     async startTask(params: StartTaskParams): Promise<StartTaskResult> {
@@ -196,7 +202,7 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
       taskAbortControllers.set(taskId, controller);
       let taskCreated = false;
       let existingState: WorkspaceState | undefined;
-      let workdir = config.codexWorkdir;
+      let workdir = resolveWorkspacePath(config.codexWorkdir);
 
       let eventSeq = 0;
       const appendEvent = (phase: TaskEventPhase, message: string, createdAt: number) => {
@@ -211,14 +217,14 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
 
       try {
         existingState = runtimeStore.getWorkspaceState(sessionKey);
-        workdir = existingState?.cwd ?? config.codexWorkdir;
+        workdir = resolveWorkspacePath(config.codexWorkdir, existingState?.cwd ?? config.codexWorkdir);
 
         runtimeStore.createTask(buildTaskRecord(taskId, sessionKey, taskKind, prompt, queuedAt));
         taskCreated = true;
         runtimeStore.saveWorkspaceState(
           resolveWorkspaceState(existingState, sessionKey, taskKind, taskId, workdir, queuedAt),
         );
-        appendEvent("queued", "\u4efb\u52a1\u5df2\u5165\u961f", queuedAt);
+        appendEvent("queued", "任务已入队", queuedAt);
 
         sessionStore.appendUser(sessionKey, prompt);
         const history = sessionStore.loadRecent(sessionKey, config.codexHistoryTurns);
@@ -260,7 +266,7 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
           ...resolveWorkspaceState(existingState, sessionKey, taskKind, taskId, workdir, finishedAt),
           lastErrorSummary: undefined,
         });
-        appendEvent("result", "\u4efb\u52a1\u5b8c\u6210", finishedAt);
+        appendEvent("result", "任务完成", finishedAt);
         runtimeStore.replaceTaskArtifacts(taskId, []);
 
         logger.info({ taskId, sessionKey, chatId, durationMs: result.durationMs }, "task completed");
@@ -309,6 +315,7 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
             logger.error({ err: cleanupError, taskId }, "failed to persist workspace error summary during cleanup");
           }
         }
+
         if (interrupted) {
           logger.info({ err: error, taskId, sessionKey, chatId }, "task interrupted");
         } else {
@@ -319,6 +326,7 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
         taskAbortControllers.delete(taskId);
       }
     },
+
     async handleWorkspaceCommand(params: {
       sessionKey: string;
       command: WorkspaceCommandName;
@@ -328,6 +336,12 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
       const cwd = resolveWorkspacePath(config.codexWorkdir, workspace?.cwd ?? config.codexWorkdir);
 
       if (params.command === "abort") {
+        const workspaceController = workspaceCommandAbortControllers.get(params.sessionKey);
+        if (workspaceController) {
+          workspaceController.abort();
+          return { text: "已终止当前工作区命令。", directives: [] };
+        }
+
         const taskId = workspace?.lastTaskId;
         if (taskId && taskAbortControllers.has(taskId)) {
           taskAbortControllers.get(taskId)?.abort();
@@ -337,6 +351,7 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
           });
           return { text: "已终止当前任务。", directives: [] };
         }
+
         return { text: "当前没有可终止的运行任务。", directives: [] };
       }
 
@@ -355,16 +370,26 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
         };
       }
 
-      const result = await workspaceCommandRunner.run({
-        cwd,
-        command: commandText,
-        timeoutMs: config.codexTimeoutMs,
-      });
+      const controller = new AbortController();
+      workspaceCommandAbortControllers.set(params.sessionKey, controller);
 
-      return {
-        text: result.exitCode === 0 ? result.stdout || "命令执行完成。" : result.stderr || result.stdout,
-        directives: [],
-      };
+      try {
+        const result = await workspaceCommandRunner.run({
+          cwd,
+          command: commandText,
+          timeoutMs: config.codexTimeoutMs,
+          abortSignal: controller.signal,
+        });
+
+        return {
+          text: result.exitCode === 0 ? result.stdout || "命令执行完成。" : result.stderr || result.stdout,
+          directives: [],
+        };
+      } finally {
+        if (workspaceCommandAbortControllers.get(params.sessionKey) === controller) {
+          workspaceCommandAbortControllers.delete(params.sessionKey);
+        }
+      }
     },
   };
 }
