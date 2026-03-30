@@ -70,11 +70,11 @@ function buildTaskRecord(
     id: taskId,
     sessionKey,
     kind: taskKind,
-    title: prompt.trim() || "task",
+    title: prompt.slice(0, 60),
     inputText: prompt,
-    status: "queued",
+    status: "running",
     createdAt,
-    startedAt: undefined,
+    startedAt: createdAt,
     finishedAt: undefined,
     summary: undefined,
     errorSummary: undefined,
@@ -120,9 +120,6 @@ export function createTaskOrchestrator(deps: TaskOrchestratorDeps) {
       const history = sessionStore.loadRecent(sessionKey, config.codexHistoryTurns);
       const codexPrompt = buildPrompt({ sessionKey, history });
       const sessionOptions = sessionStore.getSessionOptions(sessionKey);
-      const startedAt = Date.now();
-
-      runtimeStore.updateTaskStatus(taskId, "running", { startedAt });
 
       try {
         const result = await codexRunner.run({

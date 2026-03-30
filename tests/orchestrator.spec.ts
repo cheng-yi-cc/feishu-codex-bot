@@ -30,11 +30,13 @@ function makeConfig(): BotConfig {
 }
 
 describe("createTaskOrchestrator", () => {
-  it("records streamed progress and completes tracked tasks", async () => {
+  it("records streamed progress and creates tracked tasks with the requested initial shape", async () => {
     const sessionOptions: SessionOptions = {
       model: "gpt-5",
       thinkingLevel: "high",
     };
+    const prompt =
+      " 012345678901234567890123456789012345678901234567890123456789-extra-tail";
 
     const sessionStore: Pick<
       SessionStore,
@@ -44,7 +46,7 @@ describe("createTaskOrchestrator", () => {
       appendAssistant: vi.fn(),
       loadRecent: vi.fn(
         (): SessionMessage[] => [
-          { role: "user", content: "请检查仓库" },
+          { role: "user", content: "review repo" },
         ],
       ),
       getSessionOptions: vi.fn(() => sessionOptions),
@@ -69,13 +71,13 @@ describe("createTaskOrchestrator", () => {
 
     const codexRunner: CodexRunner = {
       run: vi.fn(async (request: CodexRunRequest) => {
-          request.onEvent?.({
-            type: "tool.started",
-            label: "Read src/index.ts",
-            message: "Read src/index.ts",
-          });
-          return { answer: "已完成", durationMs: 20 };
-        }),
+        request.onEvent?.({
+          type: "tool.started",
+          label: "Read src/index.ts",
+          message: "Read src/index.ts",
+        });
+        return { answer: "\u5df2\u5b8c\u6210", durationMs: 20 };
+      }),
     };
 
     const orchestrator = createTaskOrchestrator({
@@ -89,18 +91,24 @@ describe("createTaskOrchestrator", () => {
     const result = await orchestrator.startTask({
       sessionKey: "dm:ou_allow",
       chatId: "oc_1",
-      prompt: "请检查仓库",
+      prompt,
       taskKind: "dev",
     });
 
-    expect(result.text).toBe("已完成");
-    expect(runtimeStore.createTask).toHaveBeenCalled();
+    expect(result.text).toBe("\u5df2\u5b8c\u6210");
+    expect(runtimeStore.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: prompt.slice(0, 60),
+        status: "running",
+        startedAt: expect.any(Number),
+      }),
+    );
     expect(runtimeStore.appendTaskEvent).toHaveBeenCalled();
     expect(runtimeStore.updateTaskStatus).toHaveBeenCalledWith(
       expect.any(String),
       "completed",
       expect.objectContaining({
-        summary: "已完成",
+        summary: "\u5df2\u5b8c\u6210",
         finishedAt: expect.any(Number),
       }),
     );
