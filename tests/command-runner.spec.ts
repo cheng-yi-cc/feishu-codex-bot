@@ -2,6 +2,16 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkspaceCommandRunner } from "../src/workspace/command-runner.js";
 
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("createWorkspaceCommandRunner", () => {
   it("captures stdout for a safe workspace command", async () => {
     const runner = createWorkspaceCommandRunner({
@@ -48,5 +58,75 @@ describe("createWorkspaceCommandRunner", () => {
     ).rejects.toThrow(/timed out/i);
 
     expect(terminateProcessTree).toHaveBeenCalledWith(4242);
+  });
+
+  it("still rejects on timeout when close fires before termination cleanup settles", async () => {
+    const stdout = new EventEmitter();
+    const stderr = new EventEmitter();
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    child.pid = 4243;
+    child.stdout = stdout;
+    child.stderr = stderr;
+
+    const termination = createDeferred<void>();
+    const runner = createWorkspaceCommandRunner({
+      shell: "powershell.exe",
+      maxOutputChars: 4000,
+      spawnImpl: vi.fn(() => child as never),
+      terminateProcessTreeImpl: vi.fn(() => termination.promise),
+    });
+
+    const runPromise = runner.run({
+      cwd: process.cwd(),
+      command: 'Write-Output "slow"',
+      timeoutMs: 10,
+    });
+    const rejection = expect(runPromise).rejects.toThrow(/timed out/i);
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    child.emit("close", 0);
+
+    await rejection;
+    termination.resolve();
+  });
+
+  it("still rejects on abort when close fires before termination cleanup settles", async () => {
+    const stdout = new EventEmitter();
+    const stderr = new EventEmitter();
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    child.pid = 4244;
+    child.stdout = stdout;
+    child.stderr = stderr;
+
+    const termination = createDeferred<void>();
+    const controller = new AbortController();
+    const runner = createWorkspaceCommandRunner({
+      shell: "powershell.exe",
+      maxOutputChars: 4000,
+      spawnImpl: vi.fn(() => child as never),
+      terminateProcessTreeImpl: vi.fn(() => termination.promise),
+    });
+
+    const runPromise = runner.run({
+      cwd: process.cwd(),
+      command: 'Write-Output "slow"',
+      timeoutMs: 5000,
+      abortSignal: controller.signal,
+    });
+    const rejection = expect(runPromise).rejects.toMatchObject({ name: "AbortError" });
+
+    controller.abort();
+    child.emit("close", 0);
+
+    await rejection;
+    termination.resolve();
   });
 });

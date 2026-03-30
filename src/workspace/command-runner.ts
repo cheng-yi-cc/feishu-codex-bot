@@ -64,6 +64,7 @@ export function createWorkspaceCommandRunner(options: {
         let stdout = "";
         let stderr = "";
         let settled = false;
+        let terminationError: Error | undefined;
         let abortListener: (() => void) | undefined;
 
         const finish = (callback: () => void) => {
@@ -79,13 +80,12 @@ export function createWorkspaceCommandRunner(options: {
         };
 
         const terminateAndReject = (error: Error) => {
-          if (settled) {
+          if (settled || terminationError) {
             return;
           }
-
-          void terminateProcessTreeImpl(child.pid ?? -1).finally(() => {
-            finish(() => reject(error));
-          });
+          terminationError = error;
+          finish(() => reject(error));
+          void terminateProcessTreeImpl(child.pid ?? -1);
         };
 
         const timeout = setTimeout(() => {
@@ -118,6 +118,10 @@ export function createWorkspaceCommandRunner(options: {
         });
 
         child.on("close", (code) => {
+          if (terminationError) {
+            finish(() => reject(terminationError));
+            return;
+          }
           finish(() =>
             resolve({
               exitCode: code ?? 1,
