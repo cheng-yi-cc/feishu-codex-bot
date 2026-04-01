@@ -14,7 +14,7 @@ if (!(Test-Path $logsDir)) {
 $stdout = Join-Path $logsDir "app.log"
 $stderr = Join-Path $logsDir "app.err.log"
 $startLog = Join-Path $logsDir "start-bot.log"
-$entrypoint = Join-Path $projectRoot "dist\\index.js"
+$entrypoint = Join-Path (Join-Path $projectRoot "dist") "index.js"
 
 function Write-StartLog {
   param([string]$Message)
@@ -52,6 +52,7 @@ function Invoke-LoggedProcess {
     -WorkingDirectory $projectRoot `
     -RedirectStandardOutput $stdout `
     -RedirectStandardError $stderr `
+    -WindowStyle Hidden `
     -Wait `
     -PassThru
 
@@ -70,8 +71,10 @@ function Resolve-CodexBin {
     return $env:CODEX_BIN
   }
 
+  $extensionsDir = Join-Path (Join-Path $env:USERPROFILE ".vscode") "extensions"
+  $codexPattern = Join-Path (Join-Path (Join-Path (Join-Path $extensionsDir "openai.chatgpt-*") "bin") "windows-x86_64") "codex.exe"
   $candidate = Get-ChildItem `
-    -Path (Join-Path $env:USERPROFILE ".vscode\\extensions\\openai.chatgpt-*\\bin\\windows-x86_64\\codex.exe") `
+    -Path $codexPattern `
     -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
